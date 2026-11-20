@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-palette="graphite">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="Local-first audiobook management, playback coverage tracking, and personal knowledge environment.">
+  <meta id="theme-color-meta" name="theme-color" content="#0b0d12">
+  <meta name="color-scheme" content="dark light">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Cadence">
+  <title>Cadence — Audiobook Command Centre</title>
+  <link id="app-favicon" rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23181b22'/%3E%3Ccircle cx='32' cy='32' r='18' fill='none' stroke='%23d4b483' stroke-width='4'/%3E%3Cpolygon points='28,23 44,32 28,41' fill='%23d4b483'/%3E%3C/svg%3E">
+  <link rel="manifest" href='data:application/manifest+json,{"name":"Cadence Audiobook Command Centre","short_name":"Cadence","display":"standalone","background_color":"%230b0d12","theme_color":"%230b0d12","start_url":"./index.html","icons":[{"src":"data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 192 192%27%3E%3Crect width=%27192%27 height=%27192%27 rx=%2748%27 fill=%27%23181b22%27/%3E%3Ccircle cx=%2796%27 cy=%2796%27 r=%2754%27 fill=%27none%27 stroke=%27%23d4b483%27 stroke-width=%2712%27/%3E%3Cpolygon points=%2784,69 132,96 84,123%27 fill=%27%23d4b483%27/%3E%3C/svg%3E","sizes":"192x192","type":"image/svg+xml"}]}'>
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <noscript>
+    <div style="padding:24px;font-family:system-ui,sans-serif;">
+      Cadence needs JavaScript enabled to manage your local audiobook library.
+    </div>
+  </noscript>
+
+  <!-- Customisable Developer Banner (Disabled by default in script.js BANNER_CONFIG) -->
+  <aside id="dev-banner" class="dev-banner" hidden aria-label="Announcement">
+    <div class="dev-banner-inner">
+      <p id="dev-banner-message" class="dev-banner-message"></p>
+      <a id="dev-banner-btn" class="btn btn-sm btn-primary dev-banner-btn" hidden></a>
+    </div>
+  </aside>
+
+  <div id="app-shell" class="app-shell">
+    <!-- Desktop Sidebar Navigation -->
+    <aside id="sidebar-nav" class="sidebar-nav glass-primary" aria-label="Primary Navigation">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="24" height="24" fill="none">
+            <circle cx="16" cy="16" r="11" stroke="currentColor" stroke-width="2.2"/>
+            <path d="M13.5 11.2L21 16L13.5 20.8V11.2Z" fill="currentColor"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name" id="brand-title-desktop">Cadence</span>
+          <span class="brand-sub">Command Centre</span>
+        </div>
+      </div>
+
+      <nav class="nav-list" aria-label="Main Sections">
+        <button type="button" class="nav-item is-active" data-route="dashboard">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5.5v-6.5h-5V21H4a1 1 0 0 1-1-1v-9.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          <span>Command Centre</span>
+        </button>
+        <button type="button" class="nav-item" data-route="library">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v18H6.5A2.5 2.5 0 0 1 4 18.5v-13zM4 17.5h15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          <span>Library</span>
+        </button>
+        <button type="button" class="nav-item" data-route="vault">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12a2 2 0 0 1 2 2v14l-8-4-8 4V6a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          <span>Knowledge Vault</span>
+        </button>
+        <button type="button" class="nav-item" data-route="stats">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h16M8 15v-4m4 4V7m4 8v-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <span>Statistics</span>
+        </button>
+        <button type="button" class="nav-item" data-route="settings">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+          <span>Settings</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button type="button" class="btn btn-primary btn-block" id="sidebar-import-btn">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <span>Import Audiobooks</span>
+        </button>
+        <div class="sidebar-quick-tools">
+          <button type="button" class="btn btn-ghost btn-sm" id="sidebar-theme-toggle" title="Toggle Light/Dark">
+            <span id="sidebar-theme-label">Theme</span>
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" id="sidebar-shortcuts-btn" title="Keyboard Shortcuts">
+            <span>Shortcuts</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Workspace Column -->
+    <div class="workspace-column">
+      <!-- Mobile Compact Header -->
+      <header id="mobile-header" class="mobile-header glass-compact">
+        <div class="mobile-brand">
+          <div class="brand-mark brand-mark-sm" aria-hidden="true">
+            <svg viewBox="0 0 32 32" width="20" height="20" fill="none">
+              <circle cx="16" cy="16" r="11" stroke="currentColor" stroke-width="2.2"/>
+              <path d="M13.5 11.2L21 16L13.5 20.8V11.2Z" fill="currentColor"/>
+            </svg>
+          </div>
+          <span class="mobile-page-title" id="mobile-page-title">Command Centre</span>
+        </div>
+        <div class="mobile-header-actions">
+          <button type="button" class="btn btn-icon btn-ghost" id="mobile-theme-btn" aria-label="Toggle Light or Dark Theme">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="btn btn-sm btn-primary" id="mobile-import-btn">
+            <span>+ Import</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Scrollable Route Views -->
+      <main id="main-content" class="main-content" tabindex="-1">
+        <!-- VIEW 1: COMMAND CENTRE -->
+        <section id="view-dashboard" class="view is-active" aria-labelledby="dash-heading">
+          <div class="view-header">
+            <div>
+              <p class="eyebrow">Personal Listening Headquarters</p>
+              <h1 id="dash-heading" class="page-title">Command Centre</h1>
+            </div>
+            <div class="view-header-actions">
+              <button type="button" class="btn btn-secondary btn-sm" id="dash-import-action">Import Audio</button>
+            </div>
+          </div>
+
+          <div id="dashboard-empty" class="empty-state glass-secondary prism-edge" hidden>
+            <div class="empty-artwork" aria-hidden="true">
+              <svg viewBox="0 0 48 48" width="44" height="44" fill="none">
+                <rect x="8" y="8" width="32" height="32" rx="8" stroke="currentColor" stroke-width="2"/>
+                <circle cx="24" cy="24" r="7" stroke="currentColor" stroke-width="2"/>
+                <path d="M22 21l6 3-6 3v-6z" fill="currentColor"/>
+              </svg>
+            </div>
+            <h2>Your Audiobook Library Is Ready</h2>
+            <p>Import local MP3, M4B, M4A, FLAC, WAV, or OGG audiobooks—single files or multi-chapter folders. Everything stays locally in your browser with accurate playback coverage tracking.</p>
+            <div class="empty-actions">
+              <button type="button" class="btn btn-primary" id="empty-import-files-btn">Select Audio Files</button>
+              <button type="button" class="btn btn-secondary" id="empty-import-folder-btn">Select Audiobook Folder</button>
+            </div>
+          </div>
+
+          <div id="dashboard-content" class="dashboard-grid" hidden>
+            <article id="dash-continue-card" class="glass-elevated prism-edge dash-hero-card" hidden></article>
+            <section id="dash-metrics-panel" class="glass-secondary dash-panel"></section>
+            <section id="dash-unfinished-panel" class="glass-secondary dash-panel" hidden></section>
+            <section id="dash-recent-added-panel" class="glass-secondary dash-panel" hidden></section>
+            <section id="dash-collections-panel" class="glass-secondary dash-panel"></section>
+            <section id="dash-vault-panel" class="glass-secondary dash-panel"></section>
+          </div>
+        </section>
+
+        <!-- VIEW 2: LIBRARY -->
+        <section id="view-library" class="view" aria-labelledby="lib-heading" hidden>
+          <div class="view-header">
+            <div>
+              <p class="eyebrow">Collection Management</p>
+              <h1 id="lib-heading" class="page-title">Audiobook Library</h1>
+            </div>
+            <div class="view-header-actions">
+              <button type="button" class="btn btn-secondary btn-sm" id="lib-new-collection-btn">New Collection</button>
+              <button type="button" class="btn btn-primary btn-sm" id="lib-import-btn">+ Import</button>
+            </div>
+          </div>
+
+          <div class="library-toolbar glass-secondary">
+            <div class="search-field">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              <input type="search" id="lib-search" placeholder="Search titles, authors, narrators, series..." aria-label="Search library">
+            </div>
+
+            <div class="toolbar-controls">
+              <select id="lib-filter-status" aria-label="Filter by status">
+                <option value="all">All Statuses</option>
+                <option value="in-progress">In Progress</option>
+                <option value="unstarted">Unstarted</option>
+                <option value="completed">Completed</option>
+                <option value="has-gaps">Has Skipped Gaps</option>
+              </select>
+
+              <select id="lib-filter-collection" aria-label="Filter by collection">
+                <option value="all">All Collections</option>
+              </select>
+
+              <select id="lib-filter-series" aria-label="Filter by series">
+                <option value="all">All Series</option>
+              </select>
+
+              <select id="lib-sort" aria-label="Sort library">
+                <option value="recent-played">Recently Played</option>
+                <option value="recent-added">Recently Added</option>
+                <option value="title">Title (A–Z)</option>
+                <option value="author">Author (A–Z)</option>
+                <option value="duration-desc">Duration (Longest)</option>
+                <option value="coverage-desc">Coverage (%)</option>
+              </select>
+
+              <div class="segmented-control" role="group" aria-label="Library view mode">
+                <button type="button" class="seg-btn is-active" data-lib-view="grid" aria-label="Grid View">Grid</button>
+                <button type="button" class="seg-btn" data-lib-view="list" aria-label="List View">List</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="lib-collections-strip" class="collections-strip" hidden></div>
+          <div id="lib-series-panel" class="glass-secondary series-strip" hidden></div>
+
+          <div id="lib-empty" class="empty-state glass-secondary" hidden>
+            <h2>No Matching Audiobooks</h2>
+            <p id="lib-empty-msg">Import local audio files or folders to populate your library.</p>
+            <button type="button" class="btn btn-primary" id="lib-empty-import-btn">Import Audiobooks</button>
+          </div>
+
+          <div id="lib-items" class="library-grid"></div>
+        </section>
+
+        <!-- VIEW 3: BOOK DETAIL -->
+        <section id="view-book-detail" class="view" aria-labelledby="detail-book-title" hidden>
+          <div class="detail-topbar">
+            <button type="button" class="btn btn-ghost btn-sm" id="detail-back-btn">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>Back to Library</span>
+            </button>
+            <div class="detail-topbar-actions">
+              <button type="button" class="btn btn-secondary btn-sm" id="detail-edit-btn">Edit Metadata</button>
+              <button type="button" class="btn btn-danger btn-sm" id="detail-delete-btn">Remove</button>
+            </div>
+          </div>
+
+          <div id="book-detail-container" class="book-detail-layout"></div>
+        </section>
+
+        <!-- VIEW 4: KNOWLEDGE VAULT -->
+        <section id="view-vault" class="view" aria-labelledby="vault-heading" hidden>
+          <div class="view-header">
+            <div>
+              <p class="eyebrow">Personal Knowledge Library</p>
+              <h1 id="vault-heading" class="page-title">Knowledge Vault</h1>
+            </div>
+            <div class="view-header-actions">
+              <button type="button" class="btn btn-primary btn-sm" id="vault-new-note-btn">+ New Note</button>
+            </div>
+          </div>
+
+          <div class="library-toolbar glass-secondary">
+            <div class="search-field">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              <input type="search" id="vault-search" placeholder="Search notes, quotes, bookmarks, tags..." aria-label="Search Knowledge Vault">
+            </div>
+            <div class="toolbar-controls">
+              <select id="vault-filter-type" aria-label="Filter by entry type">
+                <option value="all">All Entries</option>
+                <option value="bookmark">Bookmarks</option>
+                <option value="note">Notes</option>
+                <option value="quote">Quotes</option>
+                <option value="idea">Ideas</option>
+                <option value="question">Questions</option>
+                <option value="highlight">Transcript Highlights</option>
+              </select>
+              <select id="vault-filter-book" aria-label="Filter by audiobook">
+                <option value="all">All Audiobooks</option>
+              </select>
+              <select id="vault-filter-tag" aria-label="Filter by tag">
+                <option value="all">All Tags</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="vault-list" class="vault-grid"></div>
+        </section>
+
+        <!-- VIEW 5: STATISTICS & CALENDAR -->
+        <section id="view-stats" class="view" aria-labelledby="stats-heading" hidden>
+          <div class="view-header">
+            <div>
+              <p class="eyebrow">Listening Intelligence</p>
+              <h1 id="stats-heading" class="page-title">Statistics &amp; History</h1>
+            </div>
+            <div class="view-header-actions">
+              <button type="button" class="btn btn-secondary btn-sm" id="stats-edit-goals-btn">Edit Goals</button>
+            </div>
+          </div>
+
+          <div id="stats-container" class="stats-layout"></div>
+        </section>
+
+        <!-- VIEW 6: SETTINGS -->
+        <section id="view-settings" class="view" aria-labelledby="settings-heading" hidden>
+          <div class="view-header">
+            <div>
+              <p class="eyebrow">Preferences &amp; Infrastructure</p>
+              <h1 id="settings-heading" class="page-title">Settings</h1>
+            </div>
+          </div>
+
+          <div class="settings-layout">
+            <section class="glass-secondary settings-card">
+              <h2>Appearance &amp; Theme</h2>
+              <div class="setting-row">
+                <div>
+                  <strong>Colour Mode</strong>
+                  <p class="setting-desc">Switch between Dark, Light, or follow your operating system.</p>
+                </div>
+                <div class="segmented-control" role="group" aria-label="Theme mode">
+                  <button type="button" class="seg-btn" data-theme-mode="dark">Dark</button>
+                  <button type="button" class="seg-btn" data-theme-mode="light">Light</button>
+                  <button type="button" class="seg-btn" data-theme-mode="system">System</button>
+                </div>
+              </div>
+
+              <div class="setting-block">
+                <strong>Curated Palette Family</strong>
+                <div class="palette-grid" id="palette-selector">
+                  <button type="button" class="palette-chip" data-palette-choice="graphite">
+                    <span class="swatch-pair"><span style="background:#151820"></span><span style="background:#d6b785"></span></span>
+                    <span>Graphite &amp; Champagne</span>
+                  </button>
+                  <button type="button" class="palette-chip" data-palette-choice="pearl">
+                    <span class="swatch-pair"><span style="background:#f2ece4"></span><span style="background:#9d6b43"></span></span>
+                    <span>Warm Pearl &amp; Bronze</span>
+                  </button>
+                  <button type="button" class="palette-chip" data-palette-choice="midnight">
+                    <span class="swatch-pair"><span style="background:#141322"></span><span style="background:#a584c7"></span></span>
+                    <span>Midnight Ink &amp; Plum</span>
+                  </button>
+                  <button type="button" class="palette-chip" data-palette-choice="stone">
+                    <span class="swatch-pair"><span style="background:#1c2023"></span><span style="background:#7ca3a8"></span></span>
+                    <span>Neutral Stone &amp; Slate</span>
+                  </button>
+                  <button type="button" class="palette-chip" data-palette-choice="aurora">
+                    <span class="swatch-pair"><span style="background:#0b2b30"></span><span style="background:#2dd4bf"></span></span>
+                    <span>Aurora Teal &amp; Violet</span>
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <section class="glass-secondary settings-card">
+              <h2>Audio &amp; Playback</h2>
+              <div class="setting-row">
+                <div>
+                  <strong>Default Playback Speed</strong>
+                  <p class="setting-desc">Applied to newly opened books unless overridden per book.</p>
+                </div>
+                <select id="setting-default-speed" aria-label="Default playback speed">
+                  <option value="1">1.00x</option>
+                  <option value="1.15">1.15x</option>
+                  <option value="1.25">1.25x</option>
+                  <option value="1.5">1.50x</option>
+                  <option value="1.75">1.75x</option>
+                  <option value="2">2.00x</option>
+                </select>
+              </div>
+              <div class="setting-row">
+                <div>
+                  <strong>Skip Backward Interval</strong>
+                  <p class="setting-desc">Rewind step for player buttons, media keys, and shortcuts.</p>
+                </div>
+                <select id="setting-skip-back" aria-label="Skip backward seconds">
+                  <option value="5">5 sec</option>
+                  <option value="10">10 sec</option>
+                  <option value="15">15 sec</option>
+                  <option value="30">30 sec</option>
+                  <option value="60">60 sec</option>
+                </select>
+              </div>
+              <div class="setting-row">
+                <div>
+                  <strong>Skip Forward Interval</strong>
+                  <p class="setting-desc">Forward step for player buttons, media keys, and shortcuts.</p>
+                </div>
+                <select id="setting-skip-fwd" aria-label="Skip forward seconds">
+                  <option value="5">5 sec</option>
+                  <option value="10">10 sec</option>
+                  <option value="15">15 sec</option>
+                  <option value="30">30 sec</option>
+                  <option value="60">60 sec</option>
+                </select>
+              </div>
+              <div class="setting-row">
+                <div>
+                  <strong>Web Audio Narrator Enhancement</strong>
+                  <p class="setting-desc">Enable 4-band equaliser &amp; safety limiter (turn off for raw native output).</p>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="setting-webaudio-enabled">
+                  <span class="toggle-track"></span>
+                </label>
+              </div>
+            </section>
+
+            <section class="glass-secondary settings-card">
+              <h2>Local Storage &amp; Media</h2>
+              <div id="storage-overview" class="storage-overview"></div>
+              <div class="setting-actions">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-request-persist">Request Persistent Storage</button>
+                <button type="button" class="btn btn-danger btn-sm" id="btn-purge-audio-blobs">Remove Local Audio Copies</button>
+              </div>
+            </section>
+
+            <section class="glass-secondary settings-card">
+              <h2>Backup &amp; Restoration</h2>
+              <p class="setting-desc">Export metadata, playback positions, coverage intervals, listening sessions, collections, transcripts, bookmarks, and notes as a portable JSON archive. Raw audio files are not embedded inside JSON backups.</p>
+              <div class="setting-actions">
+                <button type="button" class="btn btn-primary btn-sm" id="btn-export-backup">Export Backup (.json)</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-restore-backup">Restore from Backup</button>
+              </div>
+            </section>
+
+            <section class="glass-secondary settings-card">
+              <h2>Browser Capabilities &amp; Application Info</h2>
+              <div id="capabilities-list" class="capabilities-list"></div>
+              <div class="setting-actions">
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-open-shortcuts">Keyboard Shortcuts</button>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+
+      <!-- Floating Persistent Mini-Player -->
+      <div id="mini-player" class="mini-player glass-primary prism-edge" hidden role="region" aria-label="Mini Audio Player">
+        <div class="mini-progress-track" aria-hidden="true">
+          <div id="mini-progress-fill" class="mini-progress-fill"></div>
+        </div>
+        <div class="mini-player-body">
+          <button type="button" class="mini-book-trigger" id="mini-expand-btn" aria-label="Open full player">
+            <span id="mini-cover-wrap" class="mini-cover-wrap">
+              <img id="mini-cover" class="mini-cover" alt="" hidden>
+              <span id="mini-cover-fallback" class="mini-cover-fallback" aria-hidden="true"></span>
+            </span>
+            <span class="mini-meta">
+              <span id="mini-title" class="mini-title"></span>
+              <span id="mini-subtitle" class="mini-subtitle"></span>
+            </span>
+          </button>
+
+          <div class="mini-controls">
+            <button type="button" class="btn btn-icon btn-ghost mini-hide-xs" id="mini-back-btn" aria-label="Skip backward">
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 5V2L7 6l5 4V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z" fill="currentColor"/></svg>
+            </button>
+            <button type="button" class="btn btn-icon btn-primary" id="mini-play-btn" aria-label="Play or Pause">
+              <svg id="mini-play-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="7,5 19,12 7,19" fill="currentColor"/></svg>
+            </button>
+            <button type="button" class="btn btn-icon btn-ghost" id="mini-fwd-btn" aria-label="Skip forward">
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 5V2l5 4-5 4V7a6 6 0 1 0 6 6h2a8 8 0 1 1-8-8z" fill="currentColor"/></svg>
+            </button>
+            <button type="button" class="btn btn-icon btn-ghost mini-hide-xs" id="mini-bookmark-btn" aria-label="Quick bookmark">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 4h12v16l-6-4-6 4V4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="eq-bars mini-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mobile Bottom Navigation -->
+      <nav id="bottom-nav" class="bottom-nav glass-primary" aria-label="Mobile Navigation">
+        <button type="button" class="bnav-item is-active" data-route="dashboard">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5.5v-6.5h-5V21H4a1 1 0 0 1-1-1v-9.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          <span>Home</span>
+        </button>
+        <button type="button" class="bnav-item" data-route="library">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v18H6.5A2.5 2.5 0 0 1 4 18.5v-13zM4 17.5h15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          <span>Library</span>
+        </button>
+        <button type="button" class="bnav-item" data-route="vault">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 4h12a2 2 0 0 1 2 2v14l-8-4-8 4V6a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          <span>Vault</span>
+        </button>
+        <button type="button" class="bnav-item" data-route="stats">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 19V5m0 14h16M8 15v-4m4 4V7m4 8v-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <span>Stats</span>
+        </button>
+        <button type="button" class="bnav-item" data-route="settings">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9l2.1 2.1m10 10l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <span>Settings</span>
+        </button>
+      </nav>
+    </div>
+  </div>
+
+  <!-- Full Immersive Player Sheet -->
+  <section id="full-player" class="full-player" hidden role="dialog" aria-modal="true" aria-label="Full Audiobook Player">
+    <div class="full-player-backdrop"></div>
+    <div class="full-player-surface glass-elevated prism-edge prism-live">
+      <div class="fp-sheet-handle" id="fp-sheet-handle" aria-hidden="true"></div>
+      <header class="full-player-header">
+        <button type="button" class="btn btn-icon btn-ghost" id="fp-close-btn" aria-label="Collapse player">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="fp-header-context">
+          <span class="eyebrow" id="fp-chapter-indicator">Chapter 1</span>
+          <span class="fp-coverage-badge" id="fp-coverage-badge">0% Covered</span>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" id="fp-view-book-btn">Book Details</button>
+      </header>
+
+      <div class="full-player-grid">
+        <div class="fp-primary-col">
+          <div class="fp-artwork-frame glow-backlight prism-edge">
+            <div class="fp-artwork-glow" aria-hidden="true"></div>
+            <img id="fp-cover" class="fp-cover" alt="" hidden>
+            <div id="fp-cover-fallback" class="fp-cover-fallback cover-placeholder"></div>
+          </div>
+
+          <div class="fp-titles">
+            <h2 id="fp-book-title">No Audiobook Selected</h2>
+            <p id="fp-book-author" class="fp-author"></p>
+            <p id="fp-current-chapter" class="fp-chapter-title"></p>
+          </div>
+
+          <div class="fp-timeline-module">
+            <div class="timeline-mode-bar">
+              <span class="timeline-label" id="fp-timeline-scope-label">Book Timeline &amp; Coverage</span>
+              <button type="button" class="btn btn-ghost btn-xs" id="fp-timeline-scope-toggle">Switch to Chapter View</button>
+            </div>
+            <div id="fp-coverage-timeline" class="coverage-timeline" role="slider" tabindex="0" aria-label="Playback position and coverage timeline — drag or use arrow keys to seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div id="fp-timeline-tooltip" class="timeline-tooltip" hidden></div>
+            </div>
+            <div class="fp-time-readout">
+              <span id="fp-time-current" class="tabular">0:00</span>
+              <span id="fp-time-remaining" class="tabular">-0:00 remaining</span>
+              <span id="fp-time-total" class="tabular">0:00</span>
+            </div>
+          </div>
+
+          <div class="fp-transport">
+            <button type="button" class="btn btn-icon btn-ghost" id="fp-prev-chap-btn" aria-label="Previous chapter">
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 5v14M19 6l-10 6 10 6V6z" fill="currentColor"/></svg>
+            </button>
+            <button type="button" class="btn btn-secondary btn-skip" id="fp-skip-back-btn" aria-label="Skip backward">
+              <span id="fp-skip-back-label">-15s</span>
+            </button>
+            <button type="button" class="btn btn-primary btn-play-lg" id="fp-play-btn" aria-label="Play or Pause">
+              <svg id="fp-play-icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><polygon points="7,5 20,12 7,19" fill="currentColor"/></svg>
+            </button>
+            <button type="button" class="btn btn-secondary btn-skip" id="fp-skip-fwd-btn" aria-label="Skip forward">
+              <span id="fp-skip-fwd-label">+30s</span>
+            </button>
+            <button type="button" class="btn btn-icon btn-ghost" id="fp-next-chap-btn" aria-label="Next chapter">
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M18 5v14M5 6l10 6-10 6V6z" fill="currentColor"/></svg>
+            </button>
+          </div>
+
+          <div class="fp-secondary-bar">
+            <div class="fp-speed-control">
+              <button type="button" class="btn btn-secondary btn-sm" id="fp-speed-down" aria-label="Decrease speed">-</button>
+              <span id="fp-speed-readout" class="tabular speed-readout">1.00x</span>
+              <button type="button" class="btn btn-secondary btn-sm" id="fp-speed-up" aria-label="Increase speed">+</button>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" id="fp-sleep-btn">Sleep: Off</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="fp-bookmark-btn">Bookmark</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="fp-note-btn">+ Note</button>
+          </div>
+          <div class="speed-presets" id="fp-speed-presets" aria-label="Playback speed presets">
+            <button type="button" class="sp-btn" data-speed="0.75">0.75x</button>
+            <button type="button" class="sp-btn" data-speed="1">1x</button>
+            <button type="button" class="sp-btn" data-speed="1.25">1.25x</button>
+            <button type="button" class="sp-btn" data-speed="1.5">1.5x</button>
+            <button type="button" class="sp-btn" data-speed="1.75">1.75x</button>
+            <button type="button" class="sp-btn" data-speed="2">2x</button>
+          </div>
+
+          <div class="fp-volume-control">
+            <button type="button" class="btn btn-icon btn-ghost" id="fp-mute-btn" aria-label="Mute or unmute" style="min-height:40px;height:40px;width:40px;">
+              <svg id="fp-vol-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </button>
+            <input type="range" id="fp-volume" min="0" max="1" step="0.02" value="1" aria-label="Playback volume">
+          </div>
+
+          <div id="fp-sleep-warning" class="sleep-warning" hidden></div>
+        </div>
+
+        <div class="fp-tools-col glass-secondary">
+          <div class="fp-tabs" role="tablist">
+            <button type="button" class="fp-tab is-active" role="tab" aria-selected="true" data-fp-tab="chapters">Chapters</button>
+            <button type="button" class="fp-tab" role="tab" aria-selected="false" data-fp-tab="coverage">Coverage</button>
+            <button type="button" class="fp-tab" role="tab" aria-selected="false" data-fp-tab="eq">Equaliser</button>
+            <button type="button" class="fp-tab" role="tab" aria-selected="false" data-fp-tab="transcript">Transcript</button>
+          </div>
+
+          <div id="fp-panel-chapters" class="fp-tab-panel is-active"></div>
+          <div id="fp-panel-coverage" class="fp-tab-panel" hidden></div>
+          <div id="fp-panel-eq" class="fp-tab-panel" hidden></div>
+          <div id="fp-panel-transcript" class="fp-tab-panel" hidden></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Modal System -->
+  <div id="modal-backdrop" class="modal-backdrop" hidden>
+    <div id="modal-dialog" class="modal-dialog glass-elevated prism-edge" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-grabber" aria-hidden="true"></div>
+      <header class="modal-header">
+        <h2 id="modal-title" class="modal-title"></h2>
+        <button type="button" class="btn btn-icon btn-ghost" id="modal-close-btn" aria-label="Close modal">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </header>
+      <div id="modal-body" class="modal-body"></div>
+      <footer id="modal-footer" class="modal-footer" hidden></footer>
+    </div>
+  </div>
+
+  <!-- Hidden File Inputs -->
+  <input type="file" id="file-input-audio" multiple accept="audio/*,.mp3,.m4a,.m4b,.aac,.flac,.wav,.ogg,.opus" hidden>
+  <input type="file" id="file-input-folder" webkitdirectory directory multiple hidden>
+  <input type="file" id="file-input-backup" accept="application/json,.json" hidden>
+  <input type="file" id="file-input-cover" accept="image/*" hidden>
+  <input type="file" id="file-input-transcript" accept=".vtt,.srt,text/vtt,application/x-subrip" hidden>
+
+  <!-- Toast Notifications -->
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="false"></div>
+
+  <!-- Authoritative Audio Element -->
+  <audio id="audio-element" preload="metadata"></audio>
+</body>
+</html>
