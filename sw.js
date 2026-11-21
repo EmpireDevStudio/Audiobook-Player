@@ -8,7 +8,7 @@ const SHELL_ASSETS = [
   './index.html',
   './style.css',
   './script.js',
-  './manifest.webmanifest',
+  './manifest.json',
   './icon-192.png',
   './icon-512.png',
   './icon-maskable-512.png',

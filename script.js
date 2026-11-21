@@ -775,7 +775,7 @@ const MetadataParser = {
                       const pStart = ds + 8;
                       if (itemType === '©nam') meta.title = decUtf8(pStart, de);
                       else if (itemType === '©alb') meta.album = decUtf8(pStart, de);
-                      else if (itemType === '©ART' || itemType === 'aART') meta.author = meta.author || decUtf8(pStart, de);
+                      else if (itemType === '©ART' || itemType === 'aART' || itemType === '©aut') meta.author = meta.author || decUtf8(pStart, de);
                       else if (itemType === '©wrt') meta.narrator = meta.narrator || decUtf8(pStart, de);
                       else if (itemType === '©gen') meta.genre = decUtf8(pStart, de);
                       else if (itemType === '©day') meta.year = decUtf8(pStart, de).slice(0, 4);
@@ -1757,29 +1757,66 @@ class ImporterService {
         exactDuplicateOf: exactDup ? existingBooks.find(b => b.id === exactDup.bookId)?.title || 'Existing Book' : null
       });
     }
-    this._showReviewModal(this._groupIntoBooks(parsed, existingBooks));
+    this._showReviewModal(parsed, existingBooks);
   }
 
-  _groupIntoBooks(items, existingBooks) {
+  _groupIntoBooks(items, existingBooks, mode = 'files-and-folders') {
     const map = new Map();
-    for (const item of items) {
-      const folderParts = item.folderPath.split('/').filter(Boolean);
-      const parentFolder = folderParts.length > 1 ? folderParts[folderParts.length - 2] : '';
-      const groupKey = parentFolder ? `dir:${parentFolder}` : `album:${(item.meta.album || item.meta.title).toLowerCase()}`;
-      if (!map.has(groupKey)) {
-        map.set(groupKey, {
-          id: Utils.uid('prop'),
-          title: item.meta.album || parentFolder || item.meta.title || 'Untitled Audiobook',
-          author: item.meta.author || '', narrator: item.meta.narrator || '',
-          genre: item.meta.genre || '', year: item.meta.year || '',
-          series: '', seriesIndex: '', artworkDataUrl: item.meta.artworkDataUrl || null, items: []
-        });
+
+    if (mode === 'single-book') {
+      const firstParts = (items[0]?.folderPath || '').split('/').filter(Boolean);
+      const rootFolder = firstParts.length >= 2 ? firstParts[0] : '';
+      const firstAlbum = items.find(i => i.meta.album)?.meta.album || '';
+      const single = {
+        id: Utils.uid('prop'),
+        title: rootFolder || firstAlbum || items[0]?.meta.title || 'Untitled Audiobook',
+        author: '', narrator: '', genre: '', year: '',
+        series: '', seriesIndex: '', artworkDataUrl: null, items: []
+      };
+      for (const item of items) {
+        if (!single.artworkDataUrl && item.meta.artworkDataUrl) single.artworkDataUrl = item.meta.artworkDataUrl;
+        if (!single.author && item.meta.author) single.author = item.meta.author;
+        if (!single.narrator && item.meta.narrator) single.narrator = item.meta.narrator;
+        if (!single.genre && item.meta.genre) single.genre = item.meta.genre;
+        if (!single.year && item.meta.year) single.year = item.meta.year;
+        single.items.push(item);
       }
-      const grp = map.get(groupKey);
-      if (!grp.artworkDataUrl && item.meta.artworkDataUrl) grp.artworkDataUrl = item.meta.artworkDataUrl;
-      if (!grp.author && item.meta.author) grp.author = item.meta.author;
-      if (!grp.narrator && item.meta.narrator) grp.narrator = item.meta.narrator;
-      grp.items.push(item);
+      map.set('single', single);
+    } else {
+      items.forEach((item, idx) => {
+        const folderParts = item.folderPath.split('/').filter(Boolean);
+        // When uploading a folder:
+        // - parts.length === 2 (Root/file.mp3): top-level file -> individual book (1 file = 1 book)
+        // - parts.length >= 3 (Root/Subfolder/.../file.mp3): subfolder -> individual book (1 folder = 1 book)
+        // When uploading individual files (parts.length <= 1): 1 file = 1 book
+        const isSubfolderBook = folderParts.length >= 3;
+        const subFolderName = isSubfolderBook ? folderParts[1] : '';
+        const groupKey = isSubfolderBook ? `folder:${subFolderName}` : `file:${idx}:${item.file.name}`;
+
+        if (!map.has(groupKey)) {
+          map.set(groupKey, {
+            id: Utils.uid('prop'),
+            title: isSubfolderBook
+              ? (item.meta.album || subFolderName || item.meta.title || 'Untitled Audiobook')
+              : (item.meta.title || item.meta.trackTitle || item.file.name),
+            author: item.meta.author || '',
+            narrator: item.meta.narrator || '',
+            genre: item.meta.genre || '',
+            year: item.meta.year || '',
+            series: '',
+            seriesIndex: '',
+            artworkDataUrl: item.meta.artworkDataUrl || null,
+            items: []
+          });
+        }
+        const grp = map.get(groupKey);
+        if (!grp.artworkDataUrl && item.meta.artworkDataUrl) grp.artworkDataUrl = item.meta.artworkDataUrl;
+        if (!grp.author && item.meta.author) grp.author = item.meta.author;
+        if (!grp.narrator && item.meta.narrator) grp.narrator = item.meta.narrator;
+        if (!grp.genre && item.meta.genre) grp.genre = item.meta.genre;
+        if (!grp.year && item.meta.year) grp.year = item.meta.year;
+        grp.items.push(item);
+      });
     }
 
     const groups = Array.from(map.values());
@@ -1789,7 +1826,7 @@ class ImporterService {
         if (da !== db) return da - db;
         const ta = a.meta.trackNumber ?? 9999, tb = b.meta.trackNumber ?? 9999;
         if (ta !== tb) return ta - tb;
-        return a.file.name.localeCompare(b.file.name, undefined, { numeric: true });
+        return (a.folderPath || a.file.name).localeCompare(b.folderPath || b.file.name, undefined, { numeric: true });
       });
       const totalDur = g.items.reduce((s, it) => s + (it.meta.duration || 0), 0);
       const exactDup = g.items.find(it => it.exactDuplicateOf)?.exactDuplicateOf || null;
@@ -1801,17 +1838,30 @@ class ImporterService {
     return groups;
   }
 
-  _showReviewModal(groups) {
-    const canRef = groups.every(g => g.items.every(i => !!i.handle));
-    const anyDup = groups.some(g => g.items.some(i => i.exactDuplicateOf));
+  _showReviewModal(parsedItems, existingBooks) {
+    let groupingMode = 'files-and-folders';
+    let groups = this._groupIntoBooks(parsedItems, existingBooks, groupingMode);
+    const canRef = parsedItems.every(i => !!i.handle);
+    const anyDup = parsedItems.some(i => i.exactDuplicateOf);
     const wrap = document.createElement('div');
     wrap.className = 'form-grid';
     wrap.innerHTML = `
       <div class="glass-secondary" style="padding:12px;border-radius:12px;display:flex;flex-direction:column;gap:8px;">
+        <strong>Folder &amp; File Grouping</strong>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:0.85rem;cursor:pointer;">
+          <input type="radio" name="import-grouping-mode" value="files-and-folders" checked>
+          <span><strong>1 File = 1 Book &amp; 1 Folder = 1 Book (Default)</strong> — Top-level files become individual books, and each subfolder becomes its own book.</span>
+        </label>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:0.85rem;cursor:pointer;">
+          <input type="radio" name="import-grouping-mode" value="single-book">
+          <span><strong>1 Continuous Audiobook</strong> — Combine all selected files and subfolders into one continuous audiobook.</span>
+        </label>
+      </div>
+      <div class="glass-secondary" style="padding:12px;border-radius:12px;display:flex;flex-direction:column;gap:8px;">
         <strong>Storage Mode</strong>
         <label style="display:flex;gap:8px;align-items:flex-start;font-size:0.85rem;cursor:pointer;opacity:${canRef ? 1 : 0.5};">
           <input type="radio" name="import-storage-mode" value="reference" ${canRef ? 'checked' : 'disabled'}>
-          <span><strong>Reference Existing Files</strong> — ${canRef ? 'Reads directly from your folder without copying audio into browser storage.' : 'Available in Chromium browsers via File System Access.'}</span>
+          <span><strong>Reference Existing Files</strong> — ${canRef ? 'Reads directly from your folder without copying files into browser storage.' : 'Available in Chromium browsers via File System Access.'}</span>
         </label>
         <label style="display:flex;gap:8px;align-items:flex-start;font-size:0.85rem;cursor:pointer;">
           <input type="radio" name="import-storage-mode" value="local-copy" ${canRef ? '' : 'checked'}>
@@ -1824,6 +1874,10 @@ class ImporterService {
 
     const list = wrap.querySelector('#import-groups-list');
     const renderGroups = () => {
+      const titleEl = document.getElementById('modal-title');
+      if (titleEl && !document.getElementById('modal-backdrop').hidden) {
+        titleEl.textContent = `Review Proposed Import (${groups.length} Audiobook${groups.length > 1 ? 's' : ''})`;
+      }
       list.innerHTML = '';
       groups.forEach((g, idx) => {
         const dur = g.items.reduce((s, it) => s + (it.meta.duration || 0), 0);
@@ -1854,15 +1908,31 @@ class ImporterService {
         });
         card.querySelector('[data-split]')?.addEventListener('click', () => {
           const splitOut = g.items.map(it => ({
-            id: Utils.uid('prop'), title: it.meta.trackTitle || it.file.name, author: g.author, narrator: g.narrator,
-            genre: g.genre, year: g.year, series: g.series, seriesIndex: '',
-            artworkDataUrl: it.meta.artworkDataUrl || g.artworkDataUrl, items: [it]
+            id: Utils.uid('prop'),
+            title: it.meta.trackTitle || it.meta.title || it.file.name,
+            author: it.meta.author || '',
+            narrator: it.meta.narrator || '',
+            genre: it.meta.genre || '',
+            year: it.meta.year || '',
+            series: '',
+            seriesIndex: '',
+            artworkDataUrl: it.meta.artworkDataUrl || null,
+            items: [it]
           }));
           groups.splice(idx, 1, ...splitOut); renderGroups();
         });
         list.appendChild(card);
       });
     };
+
+    wrap.querySelectorAll('input[name="import-grouping-mode"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        groupingMode = radio.value;
+        groups = this._groupIntoBooks(parsedItems, existingBooks, groupingMode);
+        renderGroups();
+      });
+    });
+
     renderGroups();
 
     UI.openModal({
