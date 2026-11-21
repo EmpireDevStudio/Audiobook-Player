@@ -403,7 +403,13 @@ const MediaStorage = {
     }
     if (fileRec.storageMode === 'reference' && fileRec.fileHandle) {
       const handle = fileRec.fileHandle;
-      if (handle.queryPermission) {
+      if (fileRec.dirHandle?.queryPermission) {
+        let dirPerm = await fileRec.dirHandle.queryPermission({ mode: 'read' });
+        if (dirPerm !== 'granted' && fileRec.dirHandle.requestPermission) {
+          dirPerm = await fileRec.dirHandle.requestPermission({ mode: 'read' });
+        }
+        if (dirPerm !== 'granted') throw new Error('PERMISSION_REQUIRED');
+      } else if (handle.queryPermission) {
         let perm = await handle.queryPermission({ mode: 'read' });
         if (perm !== 'granted' && handle.requestPermission) perm = await handle.requestPermission({ mode: 'read' });
         if (perm !== 'granted') throw new Error('PERMISSION_REQUIRED');
@@ -1688,7 +1694,7 @@ class ImporterService {
     const existingBooks = await this.app.db.getAll('books');
 
     for (let i = 0; i < audioEntries.length; i++) {
-      const { file, path, handle } = audioEntries[i];
+      const { file, path, handle, dirHandle } = audioEntries[i];
       const statusEl = document.getElementById('import-scan-status');
       const barEl = document.getElementById('import-scan-bar');
       if (statusEl) statusEl.textContent = `Reading ${i + 1} of ${audioEntries.length}: ${file.name}`;
@@ -1698,7 +1704,7 @@ class ImporterService {
       const [meta, hash] = await Promise.all([MetadataParser.parseFile(file), MetadataParser.computeFingerprint(file)]);
       const exactDup = existingFiles.find(ef => ef.hash === hash);
       parsed.push({
-        file, handle: handle || null, folderPath: path || '', meta, hash,
+        file, handle: handle || null, dirHandle: dirHandle || null, folderPath: path || '', meta, hash,
         exactDuplicateOf: exactDup ? existingBooks.find(b => b.id === exactDup.bookId)?.title || 'Existing Book' : null
       });
     }
@@ -1754,13 +1760,13 @@ class ImporterService {
     wrap.innerHTML = `
       <div class="glass-secondary" style="padding:12px;border-radius:12px;display:flex;flex-direction:column;gap:8px;">
         <strong>Storage Mode</strong>
-        <label style="display:flex;gap:8px;align-items:flex-start;font-size:0.85rem;cursor:pointer;">
-          <input type="radio" name="import-storage-mode" value="local-copy" checked>
-          <span><strong>Store Local Copy</strong> — Saves audio in browser storage (OPFS/IndexedDB) for offline playback.</span>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:0.85rem;cursor:pointer;opacity:${canRef ? 1 : 0.5};">
+          <input type="radio" name="import-storage-mode" value="reference" ${canRef ? 'checked' : 'disabled'}>
+          <span><strong>Reference Existing Files</strong> — ${canRef ? 'Reads directly from your folder without copying audio into browser storage.' : 'Available in Chromium browsers via File System Access.'}</span>
         </label>
-        <label style="display:flex;gap:8px;align-items:flex-start;font-size:0.85rem;opacity:${canRef ? 1 : 0.5};">
-          <input type="radio" name="import-storage-mode" value="reference" ${canRef ? '' : 'disabled'}>
-          <span><strong>Reference Existing Files</strong> — ${canRef ? 'Uses minimal storage via File System Access handle.' : 'Available via Chromium File System Access picker.'}</span>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:0.85rem;cursor:pointer;">
+          <input type="radio" name="import-storage-mode" value="local-copy" ${canRef ? '' : 'checked'}>
+          <span><strong>Store Local Copy</strong> — Saves audio in browser storage (OPFS/IndexedDB) for offline playback.</span>
         </label>
         ${anyDup ? `<label style="display:flex;gap:8px;align-items:center;font-size:0.85rem;cursor:pointer;"><input type="checkbox" id="import-skip-dupes" checked> <span>Skip exact duplicate files during import</span></label>` : ''}
       </div>
@@ -1847,7 +1853,9 @@ class ImporterService {
           id: fileId, bookId, name: it.file.name, size: it.file.size, type: it.file.type || 'audio/mpeg',
           duration: dur, orderIndex: fi, startOffset: bookOffset, storageMode,
           storageKind: storageMeta.storageKind, blob: storageMeta.blob,
-          fileHandle: storageMode === 'reference' ? it.handle : null, hash: it.hash
+          fileHandle: storageMode === 'reference' ? it.handle : null,
+          dirHandle: storageMode === 'reference' ? (it.dirHandle || null) : null,
+          hash: it.hash
         });
 
         if (it.meta.chapters.length > 0 && items.length === 1) {
@@ -3336,32 +3344,56 @@ class CadenceApp {
   /* ------------------------------------------------------------------------
      MODALS & GLOBAL EVENTS
      ------------------------------------------------------------------------ */
+  async pickAudioFiles() {
+    if (typeof window.showOpenFilePicker === 'function') {
+      try {
+        const handles = await window.showOpenFilePicker({
+          multiple: true,
+          types: [{ description: 'Audio Files', accept: { 'audio/*': ['.mp3', '.m4a', '.m4b', '.aac', '.flac', '.wav', '.ogg', '.opus'] } }]
+        });
+        const entries = await Promise.all(handles.map(async h => ({ file: await h.getFile(), path: h.name, handle: h })));
+        await this.importer.processFileEntries(entries);
+      } catch { /* user cancelled */ }
+      return;
+    }
+    document.getElementById('file-input-audio').click();
+  }
+
+  async pickAudioFolder() {
+    if (typeof window.showDirectoryPicker === 'function') {
+      try {
+        const dh = await window.showDirectoryPicker({ mode: 'read' });
+        const entries = [];
+        const walk = async (d, p) => {
+          for await (const e of d.values()) {
+            const np = p ? `${p}/${e.name}` : e.name;
+            if (e.kind === 'file') entries.push({ file: await e.getFile(), path: np, handle: e, dirHandle: dh });
+            else if (e.kind === 'directory') await walk(e, np);
+          }
+        };
+        await walk(dh, dh.name);
+        await this.importer.processFileEntries(entries);
+      } catch { /* user cancelled */ }
+      return;
+    }
+    document.getElementById('file-input-folder').click();
+  }
+
   openImportChooserModal() {
-    const caps = Utils.detectCapabilities();
+    const canRef = typeof window.showDirectoryPicker === 'function' || typeof window.showOpenFilePicker === 'function';
     const wrap = document.createElement('div');
     wrap.className = 'form-grid';
     wrap.innerHTML = `
-      <p class="setting-desc">Select audio files or an audiobook folder. Everything stays local in your browser.</p>
+      <p class="setting-desc">${canRef
+        ? 'Select audio files or an audiobook folder. Audio is read directly from your folder without copying files into browser storage.'
+        : 'Select audio files or an audiobook folder. Everything stays local in your browser.'}</p>
       <div class="form-grid form-grid-2">
         <button type="button" class="btn btn-primary" id="imp-pick-files">Select Audio Files</button>
-        <button type="button" class="btn btn-secondary" id="imp-pick-folder">Select Folder</button>
-        ${caps.fileSystemAccess ? `<button type="button" class="btn btn-secondary" id="imp-fsa-files">Pick Files (Reference / Copy)</button>` : ''}
-        ${typeof window.showDirectoryPicker === 'function' ? `<button type="button" class="btn btn-secondary" id="imp-fsa-dir">Pick Folder (Reference / Copy)</button>` : ''}
+        <button type="button" class="btn btn-secondary" id="imp-pick-folder">Select Audiobook Folder</button>
       </div>
     `;
-    wrap.querySelector('#imp-pick-files').addEventListener('click', () => { UI.closeModal(); document.getElementById('file-input-audio').click(); });
-    wrap.querySelector('#imp-pick-folder').addEventListener('click', () => { UI.closeModal(); document.getElementById('file-input-folder').click(); });
-    wrap.querySelector('#imp-fsa-files')?.addEventListener('click', async () => {
-      try { const h = await window.showOpenFilePicker({ multiple: true }); UI.closeModal(); await this.importer.processFileEntries(await Promise.all(h.map(async x => ({ file: await x.getFile(), path: x.name, handle: x })))); } catch { /* noop */ }
-    });
-    wrap.querySelector('#imp-fsa-dir')?.addEventListener('click', async () => {
-      try {
-        const dh = await window.showDirectoryPicker(); UI.closeModal();
-        const entries = [];
-        const walk = async (d, p) => { for await (const e of d.values()) { const np = p ? `${p}/${e.name}` : e.name; if (e.kind === 'file') entries.push({ file: await e.getFile(), path: np, handle: e }); else if (e.kind === 'directory') await walk(e, np); } };
-        await walk(dh, dh.name); await this.importer.processFileEntries(entries);
-      } catch { /* noop */ }
-    });
+    wrap.querySelector('#imp-pick-files').addEventListener('click', () => { UI.closeModal(); this.pickAudioFiles(); });
+    wrap.querySelector('#imp-pick-folder').addEventListener('click', () => { UI.closeModal(); this.pickAudioFolder(); });
     UI.openModal({ title: 'Import Audiobooks', bodyEl: wrap });
   }
 
@@ -3737,8 +3769,8 @@ class CadenceApp {
     ['sidebar-import-btn', 'mobile-import-btn', 'dash-import-action', 'lib-import-btn', 'lib-empty-import-btn'].forEach(id => {
       document.getElementById(id)?.addEventListener('click', () => this.openImportChooserModal());
     });
-    document.getElementById('empty-import-files-btn').addEventListener('click', () => document.getElementById('file-input-audio').click());
-    document.getElementById('empty-import-folder-btn').addEventListener('click', () => document.getElementById('file-input-folder').click());
+    document.getElementById('empty-import-files-btn').addEventListener('click', () => this.pickAudioFiles());
+    document.getElementById('empty-import-folder-btn').addEventListener('click', () => this.pickAudioFolder());
     document.getElementById('file-input-audio').addEventListener('change', async (e) => {
       const files = Array.from(e.target.files || []); e.target.value = '';
       if (files.length) await this.importer.processFileEntries(files.map(f => ({ file: f, path: f.name })));
