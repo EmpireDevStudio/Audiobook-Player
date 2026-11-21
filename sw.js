@@ -1,5 +1,8 @@
-/* Cadence v3.2 Service Worker — Offline App-Shell & Playback-Safe Auto-Updates */
-const CACHE_NAME = 'cadence-shell-v3.2';
+/* Cadence service worker — versioned, atomic app-shell updates */
+const requestedVersion = new URL(self.location.href).searchParams.get('version') || '';
+const APP_VERSION = /^\d+\.\d+\.\d+(?:-[\da-z.-]+)?$/i.test(requestedVersion) ? requestedVersion : '3.2.4';
+const CACHE_PREFIX = 'cadence-shell-v';
+const CACHE_NAME = `${CACHE_PREFIX}${APP_VERSION}`;
 const SHELL_ASSETS = [
   './',
   './index.html',
@@ -13,24 +16,39 @@ const SHELL_ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS)).catch(() => {})
-  );
-  self.skipWaiting();
+  event.waitUntil((async () => {
+    const scriptUrl = new URL('./script.js', self.registration.scope);
+    const scriptResponse = await fetch(new Request(scriptUrl, { cache: 'reload' }));
+    if (!scriptResponse.ok) throw new Error(`Could not download app script (HTTP ${scriptResponse.status}).`);
+
+    const source = await scriptResponse.clone().text();
+    const match = source.match(/\bversion\s*:\s*['"](\d+\.\d+\.\d+(?:-[\da-z.-]+)?)['"]/i);
+    if (!match || match[1] !== APP_VERSION) {
+      throw new Error(`GitHub Pages has not published Cadence v${APP_VERSION} yet.`);
+    }
+
+    const cache = await caches.open(CACHE_NAME);
+    await cache.put(scriptUrl, scriptResponse);
+    const requests = SHELL_ASSETS.map((asset) =>
+      new Request(new URL(asset, self.registration.scope), { cache: 'reload' })
+    ).filter((request) => request.url !== scriptUrl.href);
+    await cache.addAll(requests);
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim())
-  );
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys
+      .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+      .map((key) => caches.delete(key)));
+    await self.clients.claim();
+  })());
 });
 
 self.addEventListener('message', (event) => {
-  if (event.data?.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
+  if (event.data?.type === 'SKIP_WAITING') event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('fetch', (event) => {
@@ -39,35 +57,29 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (event.request.mode === 'navigate') {
-    event.respondWith(
-      caches.match('./index.html', { ignoreSearch: true }).then((cached) => {
-        const networkFetch = fetch(event.request)
-          .then((res) => {
-            if (res && res.status === 200) {
-              const copy = res.clone();
-              caches.open(CACHE_NAME).then((c) => c.put('./index.html', copy));
-            }
-            return res;
-          })
-          .catch(() => cached);
-        return cached || networkFetch;
-      })
-    );
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE_NAME);
+      const indexUrl = new URL('./index.html', self.registration.scope);
+      const cached = await cache.match(indexUrl);
+      try {
+        const response = await fetch(event.request, { cache: 'no-store' });
+        if (response.ok) event.waitUntil(cache.put(indexUrl, response.clone()));
+        return response.ok || !cached ? response : cached;
+      } catch (error) {
+        if (cached) return cached;
+        throw error;
+      }
+    })());
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request, { ignoreSearch: true }).then((cached) => {
-      const fetchPromise = fetch(event.request)
-        .then((res) => {
-          if (res && res.status === 200) {
-            const copy = res.clone();
-            caches.open(CACHE_NAME).then((c) => c.put(event.request, copy));
-          }
-          return res;
-        })
-        .catch(() => cached);
-      return cached || fetchPromise;
-    })
-  );
+  event.respondWith((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    const cached = await cache.match(event.request, { ignoreSearch: true });
+    if (cached) return cached;
+
+    const response = await fetch(event.request);
+    if (response.ok) event.waitUntil(cache.put(event.request, response.clone()));
+    return response;
+  })());
 });

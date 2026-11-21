@@ -12,7 +12,7 @@
 
 const APP_CONFIG = {
   appName: 'Cadence',
-  version: '3.2.3',
+  version: '3.2.4',
   schemaVersion: 1,
   dbName: 'cadence_audiobook_command_centre',
   defaultPalette: 'graphite',
@@ -37,6 +37,35 @@ function getServiceWorkerUrl(version) {
   const url = new URL('./sw.js', window.location.href);
   url.searchParams.set('version', version);
   return url;
+}
+
+function waitForServiceWorkerActivation(worker) {
+  if (worker.state === 'activated') return Promise.resolve();
+  if (worker.state === 'redundant') {
+    return Promise.reject(new Error('The app shell could not be installed. GitHub Pages may still be publishing; try again shortly.'));
+  }
+
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timeout);
+      worker.removeEventListener('statechange', onStateChange);
+    };
+    const onStateChange = () => {
+      if (worker.state === 'activated') {
+        cleanup();
+        resolve();
+      } else if (worker.state === 'redundant') {
+        cleanup();
+        reject(new Error('The app shell could not be installed. GitHub Pages may still be publishing; try again shortly.'));
+      }
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('The update download timed out. Check your connection and try again.'));
+    }, 120000);
+    worker.addEventListener('statechange', onStateChange);
+    onStateChange();
+  });
 }
 
 const BANNER_CONFIG = {
@@ -2098,15 +2127,14 @@ class CadenceApp {
   _registerServiceWorker() {
     if (!('serviceWorker' in navigator) || (location.protocol !== 'https:' && location.hostname !== 'localhost')) return;
 
-    let refreshing = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (refreshing) return;
+      if (this._refreshingForUpdate) return;
       if (this.player?.audio && !this.player.audio.paused) {
         this._pendingUpdateReload = true;
-        UI.toast('App update ready — pause playback or reload to apply.', 'info', 8000);
+        UI.toast('App update downloaded — pause playback, then tap Check for Updates to apply it.', 'info', 8000);
         return;
       }
-      refreshing = true;
+      this._refreshingForUpdate = true;
       window.location.reload();
     });
 
@@ -4067,9 +4095,30 @@ class CadenceApp {
       try {
         const publishedVersion = await getPublishedAppVersion();
         if (publishedVersion !== APP_CONFIG.version) {
-          const reg = await navigator.serviceWorker.register(getServiceWorkerUrl(publishedVersion), { updateViaCache: 'none' });
+          updateButton.textContent = 'Downloading…';
+          const workerUrl = getServiceWorkerUrl(publishedVersion);
+          const reg = await navigator.serviceWorker.register(workerUrl, { updateViaCache: 'none' });
           this._swReg = reg;
-          UI.toast(`Update v${publishedVersion} found (you have v${APP_CONFIG.version}). Installing; the app will reload when ready.`, 'info', 8000);
+          await reg.update();
+          const worker = reg.installing || reg.waiting;
+          if (worker) {
+            if (reg.waiting) worker.postMessage({ type: 'SKIP_WAITING' });
+            UI.toast(`Downloading Cadence v${publishedVersion}… Keep this window open.`, 'info', 120000);
+            await waitForServiceWorkerActivation(worker);
+          } else if (reg.active?.scriptURL !== workerUrl.href) {
+            throw new Error('The browser did not install the downloaded app update.');
+          }
+
+          if (this._pendingUpdateReload || (this.player?.audio && !this.player.audio.paused)) {
+            this._pendingUpdateReload = true;
+            UI.toast(`Cadence v${publishedVersion} is downloaded. Pause playback, then tap Check for Updates to apply it.`, 'info', 8000);
+          } else {
+            UI.toast(`Cadence v${publishedVersion} downloaded. Restarting the app…`, 'success', 8000);
+            if (!this._refreshingForUpdate) {
+              this._refreshingForUpdate = true;
+              window.location.reload();
+            }
+          }
           return;
         }
 
@@ -4085,7 +4134,8 @@ class CadenceApp {
         }
       } catch (error) {
         console.error('Could not check or install the GitHub update.', error);
-        UI.toast('Could not check or install the update. Check your internet connection and try again.', 'error');
+        const detail = error instanceof Error ? error.message : 'Unknown error.';
+        UI.toast(`Could not download or install the update: ${detail}`, 'error', 8000);
       } finally {
         updateButton.disabled = false;
         updateButton.textContent = originalLabel;
