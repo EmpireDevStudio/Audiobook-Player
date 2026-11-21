@@ -12,7 +12,8 @@
   <meta name="apple-mobile-web-app-title" content="Cadence">
   <title>Cadence — Audiobook Command Centre</title>
   <link id="app-favicon" rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23181b22'/%3E%3Ccircle cx='32' cy='32' r='18' fill='none' stroke='%23d4b483' stroke-width='4'/%3E%3Cpolygon points='28,23 44,32 28,41' fill='%23d4b483'/%3E%3C/svg%3E">
-  <link rel="manifest" href='data:application/manifest+json,{"name":"Cadence Audiobook Command Centre","short_name":"Cadence","display":"standalone","background_color":"%230b0d12","theme_color":"%230b0d12","start_url":"./index.html","icons":[{"src":"data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 192 192%27%3E%3Crect width=%27192%27 height=%27192%27 rx=%2748%27 fill=%27%23181b22%27/%3E%3Ccircle cx=%2796%27 cy=%2796%27 r=%2754%27 fill=%27none%27 stroke=%27%23d4b483%27 stroke-width=%2712%27/%3E%3Cpolygon points=%2784,69 132,96 84,123%27 fill=%27%23d4b483%27/%3E%3C/svg%3E","sizes":"192x192","type":"image/svg+xml"}]}'>
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="style.css">
   <script src="script.js" defer></script>
 </head>
@@ -23,7 +24,7 @@
     </div>
   </noscript>
 
-  <!-- Customisable Developer Banner (Disabled by default in script.js BANNER_CONFIG) -->
+  <!-- Customisable Developer Banner -->
   <aside id="dev-banner" class="dev-banner" hidden aria-label="Announcement">
     <div class="dev-banner-inner">
       <p id="dev-banner-message" class="dev-banner-message"></p>
@@ -46,6 +47,12 @@
           <span class="brand-sub">Command Centre</span>
         </div>
       </div>
+
+      <button type="button" class="btn btn-secondary btn-sm cmd-trigger-btn" id="sidebar-cmd-btn" title="Command Palette (Ctrl/Cmd+K)">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <span>Quick Jump</span>
+        <kbd class="kbd-hint">⌘K</kbd>
+      </button>
 
       <nav class="nav-list" aria-label="Main Sections">
         <button type="button" class="nav-item is-active" data-route="dashboard">
@@ -100,6 +107,9 @@
           <span class="mobile-page-title" id="mobile-page-title">Command Centre</span>
         </div>
         <div class="mobile-header-actions">
+          <button type="button" class="btn btn-icon btn-ghost" id="mobile-cmd-btn" aria-label="Quick Jump Search">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
           <button type="button" class="btn btn-icon btn-ghost" id="mobile-theme-btn" aria-label="Toggle Light or Dark Theme">
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
           </button>
@@ -119,7 +129,8 @@
               <h1 id="dash-heading" class="page-title">Command Centre</h1>
             </div>
             <div class="view-header-actions">
-              <button type="button" class="btn btn-secondary btn-sm" id="dash-import-action">Import Audio</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="dash-queue-btn">Up Next Queue</button>
+              <button type="button" class="btn btn-primary btn-sm" id="dash-import-action">+ Import Audio</button>
             </div>
           </div>
 
@@ -142,6 +153,7 @@
           <div id="dashboard-content" class="dashboard-grid" hidden>
             <article id="dash-continue-card" class="glass-elevated prism-edge dash-hero-card" hidden></article>
             <section id="dash-metrics-panel" class="glass-secondary dash-panel"></section>
+            <section id="dash-recap-panel" class="glass-secondary dash-panel" hidden></section>
             <section id="dash-unfinished-panel" class="glass-secondary dash-panel" hidden></section>
             <section id="dash-recent-added-panel" class="glass-secondary dash-panel" hidden></section>
             <section id="dash-collections-panel" class="glass-secondary dash-panel"></section>
@@ -157,8 +169,22 @@
               <h1 id="lib-heading" class="page-title">Audiobook Library</h1>
             </div>
             <div class="view-header-actions">
+              <button type="button" class="btn btn-secondary btn-sm" id="lib-select-mode-btn">Select</button>
               <button type="button" class="btn btn-secondary btn-sm" id="lib-new-collection-btn">New Collection</button>
               <button type="button" class="btn btn-primary btn-sm" id="lib-import-btn">+ Import</button>
+            </div>
+          </div>
+
+          <div id="lib-batch-bar" class="library-toolbar glass-elevated prism-edge" hidden>
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+              <strong id="lib-batch-count">0 selected</strong>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                <button type="button" class="btn btn-secondary btn-xs" id="batch-select-all">Select All</button>
+                <button type="button" class="btn btn-secondary btn-xs" id="batch-assign-col">Add to Collection</button>
+                <button type="button" class="btn btn-secondary btn-xs" id="batch-mark-complete">Mark Completed</button>
+                <button type="button" class="btn btn-danger btn-xs" id="batch-delete-btn">Remove</button>
+                <button type="button" class="btn btn-ghost btn-xs" id="batch-cancel-btn">Done</button>
+              </div>
             </div>
           </div>
 
@@ -175,6 +201,7 @@
                 <option value="unstarted">Unstarted</option>
                 <option value="completed">Completed</option>
                 <option value="has-gaps">Has Skipped Gaps</option>
+                <option value="missing-audio">Needs Audio Relink</option>
               </select>
 
               <select id="lib-filter-collection" aria-label="Filter by collection">
@@ -198,6 +225,8 @@
                 <button type="button" class="seg-btn is-active" data-lib-view="grid" aria-label="Grid View">Grid</button>
                 <button type="button" class="seg-btn" data-lib-view="list" aria-label="List View">List</button>
               </div>
+
+              <button type="button" class="btn btn-ghost btn-sm" id="lib-density-btn" title="Toggle grid density">Compact</button>
             </div>
           </div>
 
@@ -210,7 +239,7 @@
             <button type="button" class="btn btn-primary" id="lib-empty-import-btn">Import Audiobooks</button>
           </div>
 
-          <div id="lib-items" class="library-grid"></div>
+          <div id="lib-items" class="library-grid" data-density="comfortable"></div>
         </section>
 
         <!-- VIEW 3: BOOK DETAIL -->
@@ -221,6 +250,7 @@
               <span>Back to Library</span>
             </button>
             <div class="detail-topbar-actions">
+              <button type="button" class="btn btn-secondary btn-sm" id="detail-queue-btn">+ Up Next</button>
               <button type="button" class="btn btn-secondary btn-sm" id="detail-edit-btn">Edit Metadata</button>
               <button type="button" class="btn btn-danger btn-sm" id="detail-delete-btn">Remove</button>
             </div>
@@ -237,6 +267,8 @@
               <h1 id="vault-heading" class="page-title">Knowledge Vault</h1>
             </div>
             <div class="view-header-actions">
+              <button type="button" class="btn btn-secondary btn-sm" id="vault-export-md-btn">Export Markdown</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="vault-export-csv-btn">Export CSV</button>
               <button type="button" class="btn btn-primary btn-sm" id="vault-new-note-btn">+ New Note</button>
             </div>
           </div>
@@ -244,7 +276,7 @@
           <div class="library-toolbar glass-secondary">
             <div class="search-field">
               <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-              <input type="search" id="vault-search" placeholder="Search notes, quotes, bookmarks, tags..." aria-label="Search Knowledge Vault">
+              <input type="search" id="vault-search" placeholder="Search notes, quotes, bookmarks, glossary, tags..." aria-label="Search Knowledge Vault">
             </div>
             <div class="toolbar-controls">
               <select id="vault-filter-type" aria-label="Filter by entry type">
@@ -254,6 +286,7 @@
                 <option value="quote">Quotes</option>
                 <option value="idea">Ideas</option>
                 <option value="question">Questions</option>
+                <option value="glossary">Glossary Terms</option>
                 <option value="highlight">Transcript Highlights</option>
               </select>
               <select id="vault-filter-book" aria-label="Filter by audiobook">
@@ -330,6 +363,10 @@
                     <span class="swatch-pair"><span style="background:#0b2b30"></span><span style="background:#2dd4bf"></span></span>
                     <span>Aurora Teal &amp; Violet</span>
                   </button>
+                  <button type="button" class="palette-chip" data-palette-choice="obsidian">
+                    <span class="swatch-pair"><span style="background:#000000"></span><span style="background:#f59e0b"></span></span>
+                    <span>AMOLED Obsidian</span>
+                  </button>
                 </div>
               </div>
             </section>
@@ -339,7 +376,7 @@
               <div class="setting-row">
                 <div>
                   <strong>Default Playback Speed</strong>
-                  <p class="setting-desc">Applied to newly opened books unless overridden per book.</p>
+                  <p class="setting-desc">Applied to newly opened books unless overridden per book or narrator.</p>
                 </div>
                 <select id="setting-default-speed" aria-label="Default playback speed">
                   <option value="1">1.00x</option>
@@ -348,6 +385,18 @@
                   <option value="1.5">1.50x</option>
                   <option value="1.75">1.75x</option>
                   <option value="2">2.00x</option>
+                </select>
+              </div>
+              <div class="setting-row">
+                <div>
+                  <strong>Smart Rewind on Resume</strong>
+                  <p class="setting-desc">Step back briefly when resuming after pausing for more than 2 minutes.</p>
+                </div>
+                <select id="setting-smart-rewind" aria-label="Smart rewind seconds">
+                  <option value="0">Off</option>
+                  <option value="3">3 sec</option>
+                  <option value="5">5 sec</option>
+                  <option value="10">10 sec</option>
                 </select>
               </div>
               <div class="setting-row">
@@ -379,10 +428,20 @@
               <div class="setting-row">
                 <div>
                   <strong>Web Audio Narrator Enhancement</strong>
-                  <p class="setting-desc">Enable 4-band equaliser &amp; safety limiter (turn off for raw native output).</p>
+                  <p class="setting-desc">Enable 4-band equaliser, spectrum feedback &amp; safety limiter.</p>
                 </div>
                 <label class="toggle-switch">
                   <input type="checkbox" id="setting-webaudio-enabled">
+                  <span class="toggle-track"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <div>
+                  <strong>Haptic Touch Feedback</strong>
+                  <p class="setting-desc">Subtle vibration pulse when snapping to chapters or saving bookmarks on mobile.</p>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="setting-haptics-enabled">
                   <span class="toggle-track"></span>
                 </label>
               </div>
@@ -399,7 +458,7 @@
 
             <section class="glass-secondary settings-card">
               <h2>Backup &amp; Restoration</h2>
-              <p class="setting-desc">Export metadata, playback positions, coverage intervals, listening sessions, collections, transcripts, bookmarks, and notes as a portable JSON archive. Raw audio files are not embedded inside JSON backups.</p>
+              <p class="setting-desc">Export metadata, playback positions, coverage intervals, listening sessions, collections, transcripts, bookmarks, glossary terms, and notes as a portable JSON archive.</p>
               <div class="setting-actions">
                 <button type="button" class="btn btn-primary btn-sm" id="btn-export-backup">Export Backup (.json)</button>
                 <button type="button" class="btn btn-secondary btn-sm" id="btn-restore-backup">Restore from Backup</button>
@@ -410,7 +469,17 @@
               <h2>Browser Capabilities &amp; Application Info</h2>
               <div id="capabilities-list" class="capabilities-list"></div>
               <div class="setting-actions">
+                <button type="button" class="btn btn-primary btn-sm" id="btn-install-pwa" hidden>Install Cadence App</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-check-updates">Check for Updates</button>
                 <button type="button" class="btn btn-ghost btn-sm" id="btn-open-shortcuts">Keyboard Shortcuts</button>
+              </div>
+            </section>
+
+            <section class="glass-secondary settings-card settings-danger-card">
+              <h2>Full Reset</h2>
+              <p class="setting-desc">Permanently erase all audiobooks, local audio copies, playback coverage, bookmarks, notes, transcripts, collections, and settings from this device.</p>
+              <div class="setting-actions">
+                <button type="button" class="btn btn-danger btn-sm" id="btn-full-reset">Full Reset App</button>
               </div>
             </section>
           </div>
@@ -513,7 +582,7 @@
               <span class="timeline-label" id="fp-timeline-scope-label">Book Timeline &amp; Coverage</span>
               <button type="button" class="btn btn-ghost btn-xs" id="fp-timeline-scope-toggle">Switch to Chapter View</button>
             </div>
-            <div id="fp-coverage-timeline" class="coverage-timeline" role="slider" tabindex="0" aria-label="Playback position and coverage timeline — drag or use arrow keys to seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div id="fp-coverage-timeline" class="coverage-timeline" role="slider" tabindex="0" aria-label="Playback position and coverage timeline" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
               <div id="fp-timeline-tooltip" class="timeline-tooltip" hidden></div>
             </div>
             <div class="fp-time-readout">
@@ -571,17 +640,19 @@
         </div>
 
         <div class="fp-tools-col glass-secondary">
-          <div class="fp-tabs" role="tablist">
+          <div class="fp-tabs fp-tabs-5" role="tablist">
             <button type="button" class="fp-tab is-active" role="tab" aria-selected="true" data-fp-tab="chapters">Chapters</button>
             <button type="button" class="fp-tab" role="tab" aria-selected="false" data-fp-tab="coverage">Coverage</button>
             <button type="button" class="fp-tab" role="tab" aria-selected="false" data-fp-tab="eq">Equaliser</button>
             <button type="button" class="fp-tab" role="tab" aria-selected="false" data-fp-tab="transcript">Transcript</button>
+            <button type="button" class="fp-tab" role="tab" aria-selected="false" data-fp-tab="glossary">Glossary</button>
           </div>
 
           <div id="fp-panel-chapters" class="fp-tab-panel is-active"></div>
           <div id="fp-panel-coverage" class="fp-tab-panel" hidden></div>
           <div id="fp-panel-eq" class="fp-tab-panel" hidden></div>
           <div id="fp-panel-transcript" class="fp-tab-panel" hidden></div>
+          <div id="fp-panel-glossary" class="fp-tab-panel" hidden></div>
         </div>
       </div>
     </div>
@@ -608,11 +679,12 @@
   <input type="file" id="file-input-backup" accept="application/json,.json" hidden>
   <input type="file" id="file-input-cover" accept="image/*" hidden>
   <input type="file" id="file-input-transcript" accept=".vtt,.srt,text/vtt,application/x-subrip" hidden>
+  <input type="file" id="file-input-relink" multiple accept="audio/*,.mp3,.m4a,.m4b,.aac,.flac,.wav,.ogg,.opus" hidden>
 
   <!-- Toast Notifications -->
   <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="false"></div>
 
-  <!-- Authoritative Audio Element -->
+  <!-- Authoritative Audio Elements (Primary + Standby Pre-buffer) -->
   <audio id="audio-element" preload="metadata"></audio>
 </body>
 </html>
