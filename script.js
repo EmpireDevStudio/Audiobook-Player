@@ -12,7 +12,7 @@
 
 const APP_CONFIG = {
   appName: 'Cadence',
-  version: '4.1.0',
+  version: '4.0.0',
   schemaVersion: 1,
   dbName: 'cadence_audiobook_command_centre',
   defaultPalette: 'graphite',
@@ -312,6 +312,92 @@ const UI = {
         ]
       });
     });
+  },
+
+  attachHoldToConfirm(btn, {
+    holdMs = 5000,
+    idleLabel = 'Hold for 5s',
+    holdingLabel = (remSec) => `Keep holding… ${remSec}s`,
+    doneLabel = 'Done…',
+    reusable = false,
+    onComplete,
+    onShortTap = null
+  } = {}) {
+    if (!btn) return () => {};
+    const bar = btn.querySelector('.hold-reset-progress');
+    const lbl = btn.querySelector('.hold-reset-label');
+    let rafId = null;
+    let startAt = 0;
+    let completed = false;
+    let currentIdle = typeof idleLabel === 'function' ? idleLabel() : idleLabel;
+
+    const syncIdleLabel = () => {
+      currentIdle = typeof idleLabel === 'function' ? idleLabel() : idleLabel;
+      if (!rafId && !completed && lbl) lbl.textContent = currentIdle;
+    };
+
+    const resetHold = (wasCanceled = false) => {
+      if (completed && !reusable) return;
+      const elapsed = startAt ? (performance.now() - startAt) : 0;
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      startAt = 0;
+      btn.classList.remove('is-holding');
+      if (bar) bar.style.width = '0%';
+      syncIdleLabel();
+      if (wasCanceled && elapsed > 0 && elapsed < 450 && onShortTap) onShortTap();
+    };
+
+    const tick = () => {
+      const elapsed = performance.now() - startAt;
+      const pct = Utils.clamp((elapsed / holdMs) * 100, 0, 100);
+      if (bar) bar.style.width = `${pct.toFixed(1)}%`;
+      const remSec = Math.max(1, Math.ceil((holdMs - elapsed) / 1000));
+      if (elapsed >= holdMs) {
+        rafId = null;
+        startAt = 0;
+        Utils.haptic(25);
+        if (reusable) {
+          btn.classList.remove('is-holding');
+          if (bar) bar.style.width = '0%';
+          syncIdleLabel();
+        } else {
+          completed = true;
+          if (bar) bar.style.width = '100%';
+          if (lbl) lbl.textContent = doneLabel;
+          btn.disabled = true;
+        }
+        onComplete?.();
+        return;
+      }
+      if (lbl) lbl.textContent = holdingLabel(remSec);
+      rafId = requestAnimationFrame(tick);
+    };
+
+    const startHold = (e) => {
+      if (btn.disabled || (completed && !reusable) || rafId) return;
+      if (e.type === 'pointerdown' && e.button !== 0) return;
+      e.preventDefault();
+      try { btn.setPointerCapture?.(e.pointerId); } catch { /* noop */ }
+      btn.classList.add('is-holding');
+      startAt = performance.now();
+      Utils.haptic(8);
+      rafId = requestAnimationFrame(tick);
+    };
+
+    btn.addEventListener('pointerdown', startHold);
+    btn.addEventListener('pointerup', () => resetHold(true));
+    btn.addEventListener('pointercancel', () => resetHold(false));
+    btn.addEventListener('pointerleave', () => resetHold(false));
+    btn.addEventListener('keydown', (e) => {
+      if ((e.code === 'Space' || e.code === 'Enter') && !e.repeat) startHold(e);
+    });
+    btn.addEventListener('keyup', (e) => {
+      if (e.code === 'Space' || e.code === 'Enter') resetHold(true);
+    });
+    btn.addEventListener('blur', () => resetHold(false));
+    btn._syncHoldIdleLabel = syncIdleLabel;
+
+    return () => resetHold(false);
   }
 };
 
@@ -2687,6 +2773,10 @@ class CadenceApp {
             ${firstGap ? `<button type="button" class="btn btn-secondary btn-sm" id="detail-play-all-gaps-btn">Play All ${skippedGaps.length} Skipped Gap(s)</button>` : ''}
             <button type="button" class="btn btn-secondary btn-sm" id="detail-upload-art-btn">Replace Cover</button>
             <button type="button" class="btn btn-secondary btn-sm" id="detail-upload-tr-btn">${transcript ? 'Replace Transcript' : 'Attach Transcript (.vtt/.srt)'}</button>
+            <button type="button" class="btn btn-danger btn-sm hold-reset-btn-sm" id="detail-reset-data-btn" title="Hold for 5 seconds to open Reset Book Data menu">
+              <span class="hold-reset-progress"></span>
+              <span class="hold-reset-label">Hold 5s: Reset Data</span>
+            </button>
           </div>
         </div>
       </div>
@@ -2789,6 +2879,15 @@ class CadenceApp {
         inp.value = '';
       };
       inp.click();
+    });
+
+    UI.attachHoldToConfirm(document.getElementById('detail-reset-data-btn'), {
+      holdMs: 5000,
+      idleLabel: 'Hold 5s: Reset Data',
+      holdingLabel: (remSec) => `Hold ${remSec}s…`,
+      reusable: true,
+      onShortTap: () => UI.toast('Hold this button for 5 seconds to open the Reset Data menu.', 'info', 2800),
+      onComplete: () => this.openBookResetModal(book)
     });
 
     document.getElementById('detail-reset-cov-btn').addEventListener('click', async () => {
@@ -3852,6 +3951,242 @@ class CadenceApp {
         <div class="list-item-row"><span>Toggle Full Player / Mute</span><strong>F / M</strong></div>
       `
     });
+  }
+
+  openBookResetModal(book) {
+    if (!book) return;
+    const st = this.getBookStats(book);
+    const progRec = this.progressMap.get(book.id);
+    const bookSessions = this.sessions.filter(s => s.bookId === book.id);
+    const bookBookmarks = this.bookmarks.filter(bm => bm.bookId === book.id);
+    const bookNotes = this.notes.filter(n => n.bookId === book.id && n.type !== 'glossary');
+    const bookGlossary = this.notes.filter(n => n.bookId === book.id && n.type === 'glossary');
+    const transcript = this.transcriptsMap.get(book.id);
+    const inQueue = (this.settings.upNextQueue || []).includes(book.id);
+    const colCount = (book.collectionIds || []).length;
+
+    const options = [
+      {
+        key: 'progress',
+        label: 'Playback Progress & Completion',
+        detail: (progRec || st.pos > 0 || book.completed || book.lastPlayedAt)
+          ? `Pos ${Utils.formatTime(st.pos)}${book.completed ? ' · Completed' : ''}`
+          : 'None',
+        hasData: !!(progRec || st.pos > 0 || book.completed || book.lastPlayedAt)
+      },
+      {
+        key: 'coverage',
+        label: 'Playback Coverage',
+        detail: (st.coveredSec > 0 || st.listenedSec > 0 || st.intervals.length > 0)
+          ? `${st.covPct.toFixed(1)}% covered · ${Utils.formatDurationHuman(st.listenedSec)} listened`
+          : 'None',
+        hasData: !!(st.coveredSec > 0 || st.listenedSec > 0 || st.intervals.length > 0)
+      },
+      {
+        key: 'sessions',
+        label: 'Listening History (Sessions)',
+        detail: bookSessions.length ? `${bookSessions.length} session(s)` : 'None',
+        hasData: bookSessions.length > 0
+      },
+      {
+        key: 'bookmarks',
+        label: 'Bookmarks',
+        detail: bookBookmarks.length ? `${bookBookmarks.length} bookmark(s)` : 'None',
+        hasData: bookBookmarks.length > 0
+      },
+      {
+        key: 'notes',
+        label: 'Notes, Quotes & Highlights',
+        detail: bookNotes.length ? `${bookNotes.length} entry(s)` : 'None',
+        hasData: bookNotes.length > 0
+      },
+      {
+        key: 'glossary',
+        label: 'Glossary Terms',
+        detail: bookGlossary.length ? `${bookGlossary.length} term(s)` : 'None',
+        hasData: bookGlossary.length > 0
+      },
+      {
+        key: 'transcript',
+        label: 'Attached Transcript',
+        detail: transcript ? `${transcript.fileName || 'Transcript'} (${transcript.cues?.length || 0} cues)` : 'None',
+        hasData: !!transcript
+      },
+      {
+        key: 'prefs',
+        label: 'Speed, Collections & Queue',
+        detail: (book.preferredSpeed || colCount || inQueue)
+          ? [book.preferredSpeed ? `${book.preferredSpeed}x` : '', colCount ? `${colCount} collection(s)` : '', inQueue ? 'In Up Next' : ''].filter(Boolean).join(' · ')
+          : 'Default',
+        hasData: !!(book.preferredSpeed || colCount > 0 || inQueue)
+      }
+    ];
+
+    const wrap = document.createElement('div');
+    wrap.className = 'form-grid';
+    wrap.innerHTML = `
+      <p class="setting-desc">Choose which data points to permanently reset for <strong>${Utils.escapeHtml(book.title)}</strong>. Your audio files and book metadata will remain intact.</p>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span class="eyebrow">Select Data Points</span>
+        <div style="display:flex;gap:6px;">
+          <button type="button" class="btn btn-secondary btn-xs" id="book-reset-select-all">Select All</button>
+          <button type="button" class="btn btn-ghost btn-xs" id="book-reset-clear-all">Clear</button>
+        </div>
+      </div>
+      <div class="reset-options-list">
+        ${options.map(opt => `
+          <label class="reset-option-row ${opt.hasData ? '' : 'is-empty'}">
+            <input type="checkbox" class="batch-check" data-reset-key="${opt.key}" ${opt.hasData ? 'checked' : ''}>
+            <span class="reset-option-main">
+              <strong>${Utils.escapeHtml(opt.label)}</strong>
+              <span class="setting-desc">${Utils.escapeHtml(opt.detail)}</span>
+            </span>
+          </label>
+        `).join('')}
+      </div>
+      <button type="button" class="hold-reset-btn" id="book-hold-reset-btn">
+        <span class="hold-reset-progress"></span>
+        <span class="hold-reset-label">Hold for 5s to Reset Selected Data</span>
+      </button>
+    `;
+
+    const checkboxes = Array.from(wrap.querySelectorAll('input[data-reset-key]'));
+    const holdBtn = wrap.querySelector('#book-hold-reset-btn');
+    const getSelectedKeys = () => checkboxes.filter(cb => cb.checked).map(cb => cb.dataset.resetKey);
+
+    const syncButtonState = () => {
+      const count = getSelectedKeys().length;
+      holdBtn.disabled = count === 0;
+      holdBtn._syncHoldIdleLabel?.();
+    };
+
+    const cleanupHold = UI.attachHoldToConfirm(holdBtn, {
+      holdMs: 5000,
+      idleLabel: () => {
+        const count = getSelectedKeys().length;
+        if (count === 0) return 'Select at least one item to reset';
+        if (count === options.length) return 'Hold for 5s to Reset All Book Data';
+        return `Hold for 5s to Reset ${count} Selected Item${count === 1 ? '' : 's'}`;
+      },
+      holdingLabel: (remSec) => `Keep holding… ${remSec}s`,
+      doneLabel: 'Resetting…',
+      onShortTap: () => {
+        if (!holdBtn.disabled) UI.toast('Keep holding for 5 full seconds to delete the selected data.', 'info', 2500);
+      },
+      onComplete: async () => {
+        const keys = getSelectedKeys();
+        await this.performBookDataReset(book, keys);
+      }
+    });
+
+    checkboxes.forEach(cb => cb.addEventListener('change', syncButtonState));
+    wrap.querySelector('#book-reset-select-all').addEventListener('click', () => {
+      checkboxes.forEach(cb => { cb.checked = true; });
+      syncButtonState();
+    });
+    wrap.querySelector('#book-reset-clear-all').addEventListener('click', () => {
+      checkboxes.forEach(cb => { cb.checked = false; });
+      syncButtonState();
+    });
+
+    syncButtonState();
+
+    UI.openModal({
+      title: 'Reset Book Data',
+      bodyEl: wrap,
+      footerButtons: [{ label: 'Cancel', className: 'btn-secondary', onClick: () => { cleanupHold(); UI.closeModal(); } }],
+      onClose: cleanupHold
+    });
+  }
+
+  async performBookDataReset(book, selectedKeys) {
+    if (!book || !selectedKeys?.length) return;
+    const keySet = new Set(selectedKeys);
+    const isCurrent = this.player.book?.id === book.id;
+    let bookDirty = false;
+
+    if (keySet.has('progress')) {
+      if (isCurrent) {
+        this.player.pause();
+        this.player.lastPausedAt = null;
+        if (this.player.currentFileIndex !== 0 && this.player.files.length) {
+          await this.player.loadFileIndex(0, 0, false);
+        } else {
+          try { this.player.audio.currentTime = 0; } catch { /* noop */ }
+        }
+      }
+      await this.db.delete('progress', book.id);
+      this.progressMap.delete(book.id);
+      book.completed = false;
+      book.lastPlayedAt = null;
+      bookDirty = true;
+    }
+
+    if (keySet.has('coverage')) {
+      if (isCurrent) {
+        await this.coverage.resetCoverage();
+        this.coverage.sessionStartCovered = 0;
+        this.coverage.sessionAccumWallSeconds = 0;
+        this.coverage.sessionAccumContentSeconds = 0;
+      } else {
+        await this.db.put('coverage', { bookId: book.id, intervals: [], totalListeningSeconds: 0, updatedAt: Date.now() });
+      }
+    }
+
+    if (keySet.has('sessions')) {
+      const sessions = await this.db.getByIndex('sessions', 'bookId', book.id);
+      for (const s of sessions) await this.db.delete('sessions', s.id);
+      if (isCurrent) {
+        this.coverage._activeSessionId = null;
+        this.coverage.sessionAccumWallSeconds = 0;
+        this.coverage.sessionAccumContentSeconds = 0;
+      }
+    }
+
+    if (keySet.has('bookmarks')) {
+      const bms = await this.db.getByIndex('bookmarks', 'bookId', book.id);
+      for (const bm of bms) await this.db.delete('bookmarks', bm.id);
+    }
+
+    if (keySet.has('notes') || keySet.has('glossary')) {
+      const notes = await this.db.getByIndex('notes', 'bookId', book.id);
+      for (const n of notes) {
+        const isGloss = n.type === 'glossary';
+        if ((isGloss && keySet.has('glossary')) || (!isGloss && keySet.has('notes'))) {
+          await this.db.delete('notes', n.id);
+        }
+      }
+    }
+
+    if (keySet.has('transcript')) {
+      await this.db.delete('transcripts', book.id);
+      if (isCurrent) this.transcriptQuery = '';
+    }
+
+    if (keySet.has('prefs')) {
+      book.preferredSpeed = null;
+      book.collectionIds = [];
+      bookDirty = true;
+      if (isCurrent) {
+        const fallbackRate = (book.narrator && this.settings.narratorProfiles?.[book.narrator]?.speed)
+          || this.settings.defaultSpeed || 1;
+        this.player.audio.playbackRate = fallbackRate;
+        this.coverage.playbackRate = fallbackRate;
+      }
+      if ((this.settings.upNextQueue || []).includes(book.id)) {
+        this.settings.upNextQueue = this.settings.upNextQueue.filter(id => id !== book.id);
+        await this.saveSettings();
+      }
+    }
+
+    if (bookDirty) {
+      await this.db.put('books', book);
+    }
+
+    await this.refreshData();
+    if (isCurrent) this.renderPlaybackUI();
+    UI.closeModal();
+    UI.toast(`Reset ${selectedKeys.length} data ${selectedKeys.length === 1 ? 'category' : 'categories'} for "${book.title}".`, 'success');
   }
 
   openFullResetModal() {
