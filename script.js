@@ -12,7 +12,7 @@
 
 const APP_CONFIG = {
   appName: 'Cadence',
-  version: '3.2.0',
+  version: '3.2.1',
   schemaVersion: 1,
   dbName: 'cadence_audiobook_command_centre',
   defaultPalette: 'graphite',
