@@ -12,12 +12,32 @@
 
 const APP_CONFIG = {
   appName: 'Cadence',
-  version: '3.2.1',
+  version: '3.2.2',
   schemaVersion: 1,
   dbName: 'cadence_audiobook_command_centre',
   defaultPalette: 'graphite',
   defaultThemeMode: 'dark'
 };
+
+const UPDATE_CHECK_URL = 'https://raw.githubusercontent.com/EmpireDevStudio/Audiobook-Player/main/script.js';
+
+async function getPublishedAppVersion() {
+  const url = new URL(UPDATE_CHECK_URL);
+  url.searchParams.set('check', Date.now().toString());
+  const response = await fetch(url, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}.`);
+
+  const source = await response.text();
+  const match = source.match(/\bversion\s*:\s*['"](\d+\.\d+\.\d+(?:-[\da-z.-]+)?)['"]/i);
+  if (!match) throw new Error('Could not read the published app version from GitHub.');
+  return match[1];
+}
+
+function getServiceWorkerUrl(version) {
+  const url = new URL('./sw.js', window.location.href);
+  url.searchParams.set('version', version);
+  return url;
+}
 
 const BANNER_CONFIG = {
   enabled: false,
@@ -1827,7 +1847,6 @@ class ImporterService {
             const mode = wrap.querySelector('input[name="import-storage-mode"]:checked')?.value || 'local-copy';
             const skipDupes = wrap.querySelector('#import-skip-dupes')?.checked ?? true;
             await this._commitGroups(groups, mode, skipDupes);
-            UI.closeModal();
           }
         }
       ]
@@ -1836,79 +1855,164 @@ class ImporterService {
 
   async _commitGroups(groups, storageMode, skipDupes = true) {
     let importedCount = 0, skippedFiles = 0;
+    const activeGroups = [];
     for (const grp of groups) {
-      const items = grp.items.filter(it => { if (skipDupes && it.exactDuplicateOf) { skippedFiles++; return false; } return true; });
-      if (!items.length) continue;
-
-      const bookId = Utils.uid('book');
-      let bookOffset = 0;
-      const fileRecs = [], chapRecs = [];
-
-      for (let fi = 0; fi < items.length; fi++) {
-        const it = items[fi], fileId = Utils.uid('file'), dur = it.meta.duration || 0;
-        let storageMeta = { storageKind: 'reference', blob: null };
-        if (storageMode === 'local-copy') storageMeta = await MediaStorage.saveAudioCopy(fileId, it.file);
-
-        fileRecs.push({
-          id: fileId, bookId, name: it.file.name, size: it.file.size, type: it.file.type || 'audio/mpeg',
-          duration: dur, orderIndex: fi, startOffset: bookOffset, storageMode,
-          storageKind: storageMeta.storageKind, blob: storageMeta.blob,
-          fileHandle: storageMode === 'reference' ? it.handle : null,
-          dirHandle: storageMode === 'reference' ? (it.dirHandle || null) : null,
-          hash: it.hash
-        });
-
-        if (it.meta.chapters.length > 0 && items.length === 1) {
-          it.meta.chapters.forEach((c, ci) => {
-            const nextStart = it.meta.chapters[ci + 1]?.start ?? dur;
-            const cEnd = c.end && c.end > c.start ? c.end : nextStart;
-            chapRecs.push({
-              id: Utils.uid('chap'), bookId, fileId, title: c.title || `Chapter ${ci + 1}`,
-              orderIndex: chapRecs.length, fileStart: c.start, fileEnd: cEnd,
-              bookStart: bookOffset + c.start, bookEnd: bookOffset + cEnd, duration: Math.max(0, cEnd - c.start)
-            });
-          });
-        } else {
-          chapRecs.push({
-            id: Utils.uid('chap'), bookId, fileId, title: it.meta.trackTitle || `Part ${fi + 1}`,
-            orderIndex: chapRecs.length, fileStart: 0, fileEnd: dur,
-            bookStart: bookOffset, bookEnd: bookOffset + dur, duration: dur
-          });
-        }
-        bookOffset += dur;
-      }
-
-      await this.app.db.put('books', {
-        id: bookId, title: grp.title.trim() || 'Untitled Audiobook', author: grp.author.trim(), narrator: grp.narrator.trim(),
-        series: grp.series.trim(), seriesIndex: grp.seriesIndex ? Number(grp.seriesIndex) : null,
-        genre: grp.genre.trim(), year: grp.year.trim(), language: '', duration: bookOffset, chapterCount: chapRecs.length,
-        storageMode, artworkDataUrl: grp.artworkDataUrl || null, addedAt: Date.now(), lastPlayedAt: null,
-        completed: false, preferredSpeed: null, transcriptId: null, collectionIds: []
+      const items = grp.items.filter(it => {
+        if (skipDupes && it.exactDuplicateOf) { skippedFiles++; return false; }
+        return true;
       });
-      await this.app.db.putMany('files', fileRecs);
-      await this.app.db.putMany('chapters', chapRecs);
-      await this.app.db.put('coverage', { bookId, intervals: [], totalListeningSeconds: 0, updatedAt: Date.now() });
-      importedCount++;
+      if (items.length) activeGroups.push({ grp, items });
     }
 
-    await this.app.refreshData();
-    let msg = `Imported ${importedCount} audiobook${importedCount === 1 ? '' : 's'}.`;
-    if (skippedFiles > 0) msg += ` Skipped ${skippedFiles} duplicate file${skippedFiles > 1 ? 's' : ''}.`;
-    UI.toast(msg, 'success');
-
-    // Auto-request persistent storage on local-copy import
-    if (storageMode === 'local-copy' && navigator.storage?.persist) {
-      try {
-        if (!(await navigator.storage.persisted())) await navigator.storage.persist();
-      } catch { /* noop */ }
-    }
-
-    // Upgrade #40: Storage quota guard
-    if (storageMode === 'local-copy' && navigator.storage?.estimate) {
-      const est = await navigator.storage.estimate();
-      if (est.quota && (est.usage / est.quota) > 0.8) {
-        UI.toast('Browser storage is over 80% full. Consider enabling Persistent Storage in Settings.', 'error', 5500);
+    const totalFiles = activeGroups.reduce((sum, entry) => sum + entry.items.length, 0);
+    if (!totalFiles) {
+      UI.closeModal();
+      if (skippedFiles > 0) {
+        UI.toast(`Skipped ${skippedFiles} duplicate file${skippedFiles > 1 ? 's' : ''}. Nothing new to import.`, 'info');
       }
+      return;
+    }
+
+    const radius = 54;
+    const circumference = 2 * Math.PI * radius;
+
+    UI.openModal({
+      title: 'Uploading Audiobooks…',
+      bodyHtml: `
+        <div class="upload-progress-wrap" aria-live="polite">
+          <div class="upload-ring">
+            <svg class="upload-ring-svg" viewBox="0 0 128 128" aria-hidden="true">
+              <defs>
+                <linearGradient id="uploadRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="var(--accent-strong)"/>
+                  <stop offset="100%" stop-color="var(--accent)"/>
+                </linearGradient>
+              </defs>
+              <circle class="upload-ring-track" cx="64" cy="64" r="${radius}" />
+              <circle id="upload-ring-fill" class="upload-ring-fill" cx="64" cy="64" r="${radius}"
+                stroke="url(#uploadRingGrad)"
+                stroke-dasharray="${circumference.toFixed(2)}"
+                stroke-dashoffset="${circumference.toFixed(2)}" />
+            </svg>
+            <div class="upload-ring-center">
+              <span id="upload-ring-pct" class="upload-ring-pct tabular">0%</span>
+              <span id="upload-ring-label" class="upload-ring-label">Uploading</span>
+            </div>
+          </div>
+          <p id="upload-status-text" class="upload-status-text">Preparing ${totalFiles} file${totalFiles === 1 ? '' : 's'}…</p>
+          <p id="upload-sub-text" class="upload-sub-text setting-desc"></p>
+        </div>
+      `
+    });
+
+    const updateProgress = (completedFiles, currentLabel = '', subLabel = '') => {
+      const pct = totalFiles > 0 ? Math.min(100, Math.round((completedFiles / totalFiles) * 100)) : 100;
+      const fillEl = document.getElementById('upload-ring-fill');
+      const pctEl = document.getElementById('upload-ring-pct');
+      const statusEl = document.getElementById('upload-status-text');
+      const subEl = document.getElementById('upload-sub-text');
+      if (fillEl) fillEl.style.strokeDashoffset = (circumference * (1 - pct / 100)).toFixed(2);
+      if (pctEl) pctEl.textContent = `${pct}%`;
+      if (statusEl && currentLabel) statusEl.textContent = currentLabel;
+      if (subEl) subEl.textContent = subLabel;
+    };
+
+    try {
+      await Utils.nextFrame();
+      let processedFiles = 0;
+
+      for (const { grp, items } of activeGroups) {
+        const bookId = Utils.uid('book');
+        let bookOffset = 0;
+        const fileRecs = [], chapRecs = [];
+
+        for (let fi = 0; fi < items.length; fi++) {
+          const it = items[fi], fileId = Utils.uid('file'), dur = it.meta.duration || 0;
+          updateProgress(
+            processedFiles,
+            `Uploading ${processedFiles + 1} of ${totalFiles}: ${it.file.name}`,
+            grp.title ? `Book: ${grp.title}` : ''
+          );
+          await Utils.nextFrame();
+
+          let storageMeta = { storageKind: 'reference', blob: null };
+          if (storageMode === 'local-copy') storageMeta = await MediaStorage.saveAudioCopy(fileId, it.file);
+
+          fileRecs.push({
+            id: fileId, bookId, name: it.file.name, size: it.file.size, type: it.file.type || 'audio/mpeg',
+            duration: dur, orderIndex: fi, startOffset: bookOffset, storageMode,
+            storageKind: storageMeta.storageKind, blob: storageMeta.blob,
+            fileHandle: storageMode === 'reference' ? it.handle : null,
+            dirHandle: storageMode === 'reference' ? (it.dirHandle || null) : null,
+            hash: it.hash
+          });
+
+          if (it.meta.chapters.length > 0 && items.length === 1) {
+            it.meta.chapters.forEach((c, ci) => {
+              const nextStart = it.meta.chapters[ci + 1]?.start ?? dur;
+              const cEnd = c.end && c.end > c.start ? c.end : nextStart;
+              chapRecs.push({
+                id: Utils.uid('chap'), bookId, fileId, title: c.title || `Chapter ${ci + 1}`,
+                orderIndex: chapRecs.length, fileStart: c.start, fileEnd: cEnd,
+                bookStart: bookOffset + c.start, bookEnd: bookOffset + cEnd, duration: Math.max(0, cEnd - c.start)
+              });
+            });
+          } else {
+            chapRecs.push({
+              id: Utils.uid('chap'), bookId, fileId, title: it.meta.trackTitle || `Part ${fi + 1}`,
+              orderIndex: chapRecs.length, fileStart: 0, fileEnd: dur,
+              bookStart: bookOffset, bookEnd: bookOffset + dur, duration: dur
+            });
+          }
+          bookOffset += dur;
+          processedFiles++;
+          updateProgress(
+            processedFiles,
+            processedFiles === totalFiles ? 'Finalizing library…' : `Uploaded ${processedFiles} of ${totalFiles}`,
+            grp.title ? `Book: ${grp.title}` : ''
+          );
+        }
+
+        await this.app.db.put('books', {
+          id: bookId, title: grp.title.trim() || 'Untitled Audiobook', author: grp.author.trim(), narrator: grp.narrator.trim(),
+          series: grp.series.trim(), seriesIndex: grp.seriesIndex ? Number(grp.seriesIndex) : null,
+          genre: grp.genre.trim(), year: grp.year.trim(), language: '', duration: bookOffset, chapterCount: chapRecs.length,
+          storageMode, artworkDataUrl: grp.artworkDataUrl || null, addedAt: Date.now(), lastPlayedAt: null,
+          completed: false, preferredSpeed: null, transcriptId: null, collectionIds: []
+        });
+        await this.app.db.putMany('files', fileRecs);
+        await this.app.db.putMany('chapters', chapRecs);
+        await this.app.db.put('coverage', { bookId, intervals: [], totalListeningSeconds: 0, updatedAt: Date.now() });
+        importedCount++;
+      }
+
+      updateProgress(totalFiles, 'Finalizing library…', '');
+      await Utils.nextFrame();
+      await this.app.refreshData();
+      UI.closeModal();
+
+      let msg = `Imported ${importedCount} audiobook${importedCount === 1 ? '' : 's'}.`;
+      if (skippedFiles > 0) msg += ` Skipped ${skippedFiles} duplicate file${skippedFiles > 1 ? 's' : ''}.`;
+      UI.toast(msg, 'success');
+
+      // Auto-request persistent storage on local-copy import
+      if (storageMode === 'local-copy' && navigator.storage?.persist) {
+        try {
+          if (!(await navigator.storage.persisted())) await navigator.storage.persist();
+        } catch { /* noop */ }
+      }
+
+      // Upgrade #40: Storage quota guard
+      if (storageMode === 'local-copy' && navigator.storage?.estimate) {
+        const est = await navigator.storage.estimate();
+        if (est.quota && (est.usage / est.quota) > 0.8) {
+          UI.toast('Browser storage is over 80% full. Consider enabling Persistent Storage in Settings.', 'error', 5500);
+        }
+      }
+    } catch (err) {
+      console.error('Import failed:', err);
+      UI.closeModal();
+      UI.toast('Import failed while saving files. Please try again.', 'error', 5500);
     }
   }
 }
@@ -2006,7 +2110,7 @@ class CadenceApp {
       window.location.reload();
     });
 
-    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register(getServiceWorkerUrl(APP_CONFIG.version), { updateViaCache: 'none' }).then((reg) => {
       this._swReg = reg;
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') reg.update().catch(() => {});
@@ -3361,19 +3465,43 @@ class CadenceApp {
 
   async pickAudioFolder() {
     if (typeof window.showDirectoryPicker === 'function') {
+      let folderReadStarted = false;
       try {
         const dh = await window.showDirectoryPicker({ mode: 'read' });
         const entries = [];
+        UI.openModal({
+          title: 'Preparing Audiobook Folder…',
+          bodyHtml: '<p id="folder-read-status" aria-live="polite">Reading folder contents…</p><div class="progress-bar is-animated"><div class="progress-fill" style="width:35%"></div></div>'
+        });
+        folderReadStarted = true;
+        await Utils.nextFrame();
+
+        let visitedEntries = 0;
         const walk = async (d, p) => {
           for await (const e of d.values()) {
+            visitedEntries++;
             const np = p ? `${p}/${e.name}` : e.name;
             if (e.kind === 'file') entries.push({ file: await e.getFile(), path: np, handle: e, dirHandle: dh });
             else if (e.kind === 'directory') await walk(e, np);
+
+            if (visitedEntries % 20 === 0) {
+              const status = document.getElementById('folder-read-status');
+              if (status) status.textContent = `Reading folder contents… ${entries.length} file(s) found`;
+              await Utils.nextFrame();
+            }
           }
         };
         await walk(dh, dh.name);
+        const status = document.getElementById('folder-read-status');
+        if (status) status.textContent = `Found ${entries.length} file(s). Scanning for audiobooks…`;
+        UI.closeModal();
         await this.importer.processFileEntries(entries);
-      } catch { /* user cancelled */ }
+      } catch (error) {
+        if (folderReadStarted) UI.closeModal();
+        if (error?.name === 'AbortError') return;
+        console.error('Could not read the selected audiobook folder.', error);
+        UI.toast('Could not read the selected folder. Please choose it again or select audio files directly.', 'error', 6000);
+      }
       return;
     }
     document.getElementById('file-input-folder').click();
@@ -3777,7 +3905,13 @@ class CadenceApp {
     });
     document.getElementById('file-input-folder').addEventListener('change', async (e) => {
       const files = Array.from(e.target.files || []); e.target.value = '';
-      if (files.length) await this.importer.processFileEntries(files.map(f => ({ file: f, path: f.webkitRelativePath || f.name })));
+      if (!files.length) return;
+      try {
+        await this.importer.processFileEntries(files.map(f => ({ file: f, path: f.webkitRelativePath || f.name })));
+      } catch (error) {
+        console.error('Could not import files from the selected audiobook folder.', error);
+        UI.toast('Could not read the selected folder. Please try again or select audio files directly.', 'error', 6000);
+      }
     });
     document.body.addEventListener('dragover', (e) => e.preventDefault());
     document.body.addEventListener('drop', async (e) => {
@@ -3919,15 +4053,42 @@ class CadenceApp {
       if (outcome === 'accepted') this._deferredInstallPrompt = null;
       this._syncInstallUI();
     });
-    document.getElementById('btn-check-updates')?.addEventListener('click', async () => {
+    const updateButton = document.getElementById('btn-check-updates');
+    updateButton?.addEventListener('click', async () => {
       if (this._pendingUpdateReload) { window.location.reload(); return; }
-      if (!this._swReg) return UI.toast('Offline service worker is not active in this environment.', 'info');
+      if (location.protocol !== 'https:' || !('serviceWorker' in navigator)) {
+        UI.toast('Updates are available from the installed app on its GitHub Pages HTTPS site.', 'info');
+        return;
+      }
+
+      const originalLabel = updateButton.textContent;
+      updateButton.disabled = true;
+      updateButton.textContent = 'Checking…';
       try {
-        await this._swReg.update();
-        if (this._swReg.installing || this._swReg.waiting) UI.toast('Downloading update…', 'info');
-        else UI.toast(`Cadence v${APP_CONFIG.version} is up to date.`, 'success');
-      } catch {
-        UI.toast('Could not check for updates while offline.', 'error');
+        const publishedVersion = await getPublishedAppVersion();
+        if (publishedVersion !== APP_CONFIG.version) {
+          const reg = await navigator.serviceWorker.register(getServiceWorkerUrl(publishedVersion), { updateViaCache: 'none' });
+          this._swReg = reg;
+          UI.toast(`Update v${publishedVersion} found (you have v${APP_CONFIG.version}). Installing; the app will reload when ready.`, 'info', 8000);
+          return;
+        }
+
+        const reg = this._swReg || await navigator.serviceWorker.getRegistration();
+        if (reg) {
+          this._swReg = reg;
+          await reg.update();
+          if (reg.installing || reg.waiting) UI.toast('A published update is downloading…', 'info');
+          else UI.toast(`Cadence v${APP_CONFIG.version} matches the version published on GitHub.`, 'success');
+        } else {
+          this._swReg = await navigator.serviceWorker.register(getServiceWorkerUrl(APP_CONFIG.version), { updateViaCache: 'none' });
+          UI.toast(`Cadence v${APP_CONFIG.version} matches GitHub. Offline support is being set up.`, 'info');
+        }
+      } catch (error) {
+        console.error('Could not check or install the GitHub update.', error);
+        UI.toast('Could not check or install the update. Check your internet connection and try again.', 'error');
+      } finally {
+        updateButton.disabled = false;
+        updateButton.textContent = originalLabel;
       }
     });
 
