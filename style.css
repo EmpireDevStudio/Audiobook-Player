@@ -994,31 +994,206 @@ body.has-active-book .main-content {
    11. COVERAGE TIMELINE (FIBER-OPTIC TRACK & ANNOTATION PINS)
    ========================================================================== */
 
-.coverage-timeline {
-  position: relative; height: 32px; border-radius: var(--radius-sm); background: var(--timeline-track);
-  border: 1px solid var(--glass-border); cursor: pointer; touch-action: none; overflow: visible;
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.25);
+.fp-timeline-host {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding-block: 6px;
 }
-.coverage-timeline.is-scrubbing { border-color: rgba(var(--accent-rgb), 0.72); box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.18); }
+.coverage-timeline {
+  position: relative;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--timeline-track);
+  border: 1px solid var(--glass-border);
+  cursor: default;
+  overflow: visible;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.28);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.coverage-timeline.is-interactive {
+  height: 40px;
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 45%, rgba(0, 0, 0, 0.18) 100%),
+    var(--timeline-track);
+  box-shadow:
+    inset 0 2px 7px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 2px 12px rgba(0, 0, 0, 0.16);
+}
+.coverage-timeline.is-readonly {
+  cursor: default;
+  user-select: none;
+}
+.coverage-timeline.is-scrubbing {
+  border-color: rgba(var(--accent-rgb), 0.72);
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.3),
+    0 0 0 4px rgba(var(--accent-rgb), 0.18),
+    0 0 22px -4px rgba(var(--accent-rgb), 0.36);
+}
+.cov-wave-layer {
+  position: absolute;
+  inset: 4px 6px;
+  pointer-events: none;
+  z-index: 1;
+  color: var(--text-secondary);
+  opacity: 0.24;
+  overflow: hidden;
+  border-radius: calc(var(--radius-md) - 4px);
+}
+.cov-waveform-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.cov-segs-layer {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  z-index: 2;
+  pointer-events: none;
+}
 .cov-seg-played {
-  position: absolute; top: 1px; bottom: 1px; background: var(--coverage-played); opacity: 0.92; border-radius: 2px; pointer-events: none;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 0 10px rgba(var(--accent-rgb), 0.35);
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.72), var(--coverage-played));
+  opacity: 0.88;
+  border-radius: 3px;
+  pointer-events: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 0 10px rgba(var(--accent-rgb), 0.32);
+}
+.coverage-timeline.is-interactive .cov-seg-played {
+  top: 4px;
+  bottom: 4px;
+  opacity: 0.34;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+.cov-active-trail {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  z-index: 2;
+  border-radius: calc(var(--radius-md) - 3px) 0 0 calc(var(--radius-md) - 3px);
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.22) 0%, rgba(var(--accent-rgb), 0.56) 72%, rgba(var(--accent-2-rgb), 0.65) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32), 0 0 16px -4px rgba(var(--accent-rgb), 0.45);
+  pointer-events: none;
 }
 .cov-seg-gap {
-  position: absolute; top: 4px; bottom: 4px;
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
   background: repeating-linear-gradient(-45deg, var(--coverage-gap), var(--coverage-gap) 4px, transparent 4px, transparent 8px);
-  border: 1px solid rgba(var(--danger-rgb), 0.45); border-radius: 2px; pointer-events: none;
+  border: 1px solid rgba(var(--danger-rgb), 0.45);
+  border-radius: 3px;
+  pointer-events: none;
 }
-.cov-chap-tick { position: absolute; top: 0; bottom: 0; width: 1.5px; background: rgba(255, 255, 255, 0.35); pointer-events: none; }
+.cov-chap-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1.5px;
+  background: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+}
 :root[data-theme="light"] .cov-chap-tick { background: rgba(20, 24, 32, 0.3); }
 .cov-pin {
-  position: absolute; top: -4px; width: 8px; height: 8px; transform: translateX(-50%) rotate(45deg);
-  background: var(--accent-strong); border: 1px solid var(--bg-base); pointer-events: none; z-index: 4;
+  position: absolute;
+  top: -4px;
+  width: 8px;
+  height: 8px;
+  transform: translateX(-50%) rotate(45deg);
+  background: var(--accent-strong);
+  border: 1px solid var(--bg-base);
+  pointer-events: none;
+  z-index: 4;
   box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.8);
 }
 .cov-playhead {
-  position: absolute; top: -4px; bottom: -4px; width: 3px; background: var(--accent-strong);
-  border-radius: 2px; box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.95); transform: translateX(-50%); pointer-events: none;
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2.5px;
+  background: linear-gradient(180deg, #ffffff 0%, var(--accent-strong) 45%, var(--accent) 100%);
+  border-radius: 2px;
+  box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.95);
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 5;
+}
+.coverage-timeline.is-interactive .cov-playhead {
+  top: -5px;
+  bottom: -5px;
+  width: 3px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, var(--accent-strong) 50%, var(--accent) 100%);
+  box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.95), 0 0 4px rgba(255, 255, 255, 0.7);
+}
+.cov-playhead-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  background: radial-gradient(circle at 32% 28%, #ffffff 0%, var(--accent-strong) 48%, var(--accent) 100%);
+  box-shadow:
+    0 0 0 4px rgba(var(--accent-rgb), 0.24),
+    0 0 18px rgba(var(--accent-rgb), 0.72),
+    0 3px 10px rgba(0, 0, 0, 0.48);
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+  display: grid;
+  place-items: center;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+.cov-playhead-handle::before {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+}
+.cov-playhead-core {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-ink);
+  opacity: 0.78;
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.35);
+}
+.cov-playhead-handle:hover {
+  transform: translate(-50%, -50%) scale(1.14);
+  box-shadow:
+    0 0 0 6px rgba(var(--accent-rgb), 0.32),
+    0 0 24px rgba(var(--accent-rgb), 0.88),
+    0 4px 12px rgba(0, 0, 0, 0.55);
+}
+.coverage-timeline.is-scrubbing .cov-playhead-handle,
+.cov-playhead-handle:active {
+  cursor: grabbing;
+  transform: translate(-50%, -50%) scale(1.22);
+  box-shadow:
+    0 0 0 8px rgba(var(--accent-rgb), 0.36),
+    0 0 28px rgba(var(--accent-rgb), 0.98),
+    0 5px 14px rgba(0, 0, 0, 0.6);
+}
+body.is-audio-playing .coverage-timeline.is-interactive:not(.is-scrubbing) .cov-playhead-handle {
+  animation: playheadPulse 2.8s ease-in-out infinite alternate;
+}
+@keyframes playheadPulse {
+  from {
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.20), 0 0 14px rgba(var(--accent-rgb), 0.62), 0 3px 9px rgba(0, 0, 0, 0.45);
+  }
+  to {
+    box-shadow: 0 0 0 6px rgba(var(--accent-rgb), 0.34), 0 0 22px rgba(var(--accent-rgb), 0.86), 0 3px 11px rgba(0, 0, 0, 0.5);
+  }
 }
 .timeline-tooltip {
   position: absolute; bottom: calc(100% + 10px); transform: translateX(-50%); padding: 5px 10px; border-radius: var(--radius-xs);

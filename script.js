@@ -1651,28 +1651,63 @@ const TranscriptParser = {
 };
 
 class CoverageTimelineView {
-  constructor(app, { onSeek } = {}) {
+  constructor(app, { onSeek = null, interactive = true } = {}) {
     this.app = app;
-    this.onSeek = onSeek;
+    this.interactive = Boolean(interactive && typeof onSeek === 'function');
+    this.onSeek = this.interactive ? onSeek : null;
     this._signature = '';
+    this._waveBookId = null;
     this._scrubRatio = null;
+    this._scrubbing = false;
     this._chapters = [];
 
     this.el = document.createElement('div');
-    this.el.className = 'coverage-timeline';
-    this.el.setAttribute('role', 'slider');
-    this.el.setAttribute('tabindex', '0');
-    this.el.setAttribute('aria-valuemin', '0');
-    this.el.setAttribute('aria-valuemax', '100');
-    this.el.setAttribute('aria-valuenow', '0');
+    this.el.className = `coverage-timeline ${this.interactive ? 'is-interactive' : 'is-readonly'}`;
+    if (this.interactive) {
+      this.el.setAttribute('role', 'slider');
+      this.el.setAttribute('tabindex', '0');
+      this.el.setAttribute('aria-label', 'Playback position and coverage timeline');
+      this.el.setAttribute('aria-valuemin', '0');
+      this.el.setAttribute('aria-valuemax', '100');
+      this.el.setAttribute('aria-valuenow', '0');
+    } else {
+      this.el.setAttribute('role', 'progressbar');
+      this.el.setAttribute('aria-label', 'Playback coverage and skipped gaps (read-only)');
+      this.el.setAttribute('aria-valuemin', '0');
+      this.el.setAttribute('aria-valuemax', '100');
+      this.el.setAttribute('aria-valuenow', '0');
+      this.el.setAttribute('aria-readonly', 'true');
+    }
+
+    if (this.interactive) {
+      this._waveLayer = document.createElement('div');
+      this._waveLayer.className = 'cov-wave-layer';
+      this._waveLayer.setAttribute('aria-hidden', 'true');
+      this.el.appendChild(this._waveLayer);
+    }
 
     this._segsLayer = document.createElement('div');
-    this._segsLayer.style.cssText = 'position:absolute;inset:0;';
+    this._segsLayer.className = 'cov-segs-layer';
     this.el.appendChild(this._segsLayer);
+
+    if (this.interactive) {
+      this._trail = document.createElement('div');
+      this._trail.className = 'cov-active-trail';
+      this._trail.style.width = '0%';
+      this.el.appendChild(this._trail);
+    }
 
     this._playhead = document.createElement('div');
     this._playhead.className = 'cov-playhead';
     this._playhead.style.left = '0%';
+    if (this.interactive) {
+      this._handle = document.createElement('button');
+      this._handle.type = 'button';
+      this._handle.className = 'cov-playhead-handle';
+      this._handle.setAttribute('aria-label', 'Drag to move playback position');
+      this._handle.innerHTML = '<span class="cov-playhead-core" aria-hidden="true"></span>';
+      this._playhead.appendChild(this._handle);
+    }
     this.el.appendChild(this._playhead);
 
     this._tip = document.createElement('div');
@@ -1681,6 +1716,26 @@ class CoverageTimelineView {
     this.el.appendChild(this._tip);
 
     this._bindEvents();
+  }
+
+  _renderWaveform(bookId) {
+    if (!this._waveLayer || this._waveBookId === bookId) return;
+    this._waveBookId = bookId;
+    let seed = Utils.hashString(String(bookId || 'cadence'));
+    const barCount = 72;
+    const viewW = 360;
+    const step = viewW / barCount;
+    const bars = [];
+    for (let i = 0; i < barCount; i++) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      const n = (seed % 1000) / 1000;
+      const env = 0.55 + 0.45 * Math.sin((i / barCount) * Math.PI * 3.2);
+      const h = Math.round(6 + (n * 18 * env));
+      const y = ((32 - h) / 2).toFixed(1);
+      const x = (i * step + 1.2).toFixed(2);
+      bars.push(`<rect x="${x}" y="${y}" width="2.4" height="${h}" rx="1.2"/>`);
+    }
+    this._waveLayer.innerHTML = `<svg class="cov-waveform-svg" viewBox="0 0 ${viewW} 32" preserveAspectRatio="none">${bars.join('')}</svg>`;
   }
 
   _bindEvents() {
@@ -1699,35 +1754,56 @@ class CoverageTimelineView {
       this._tip.hidden = false;
       this._tip.style.left = `${Utils.clamp(ratio * 100, 8, 92)}%`;
       this._tip.textContent = ch ? `${Utils.formatTime(sec)} · ${ch.title}` : Utils.formatTime(sec);
-      if (this._scrubRatio !== null) this._playhead.style.left = `${ratio * 100}%`;
+      if (this._scrubRatio !== null) {
+        this._playhead.style.left = `${ratio * 100}%`;
+        if (this._trail) this._trail.style.width = `${ratio * 100}%`;
+      }
     };
 
-    el.addEventListener('pointermove', (e) => { if (!this._scrubbing) showTip(ratioFromEvent(e.clientX)); });
-    el.addEventListener('pointerleave', () => { if (!this._scrubbing) this._tip.hidden = true; });
-    el.addEventListener('pointerdown', (e) => {
-      if (!this.onSeek) return;
-      e.preventDefault();
-      try { el.setPointerCapture?.(e.pointerId); } catch { /* noop */ }
-      this._scrubbing = true; el.classList.add('is-scrubbing');
-      this._scrubRatio = ratioFromEvent(e.clientX);
-      showTip(this._scrubRatio);
-    });
+    // Hovering anywhere along the bar still previews timestamp/chapter without moving playback
     el.addEventListener('pointermove', (e) => {
+      if (!this._scrubbing) showTip(ratioFromEvent(e.clientX));
+    });
+    el.addEventListener('pointerleave', () => {
+      if (!this._scrubbing) this._tip.hidden = true;
+    });
+
+    if (!this.interactive || !this._handle) return;
+
+    // Only physical dragging of the playhead icon/handle moves the current audio position
+    const handle = this._handle;
+    handle.addEventListener('pointerdown', (e) => {
+      if (!this.onSeek || e.button > 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      try { handle.setPointerCapture?.(e.pointerId); } catch { /* noop */ }
+      this._scrubbing = true;
+      el.classList.add('is-scrubbing');
+      this._scrubRatio = this._lastRatio ?? ratioFromEvent(e.clientX);
+      showTip(this._scrubRatio);
+      Utils.haptic(4);
+    });
+    handle.addEventListener('pointermove', (e) => {
       if (!this._scrubbing) return;
+      e.stopPropagation();
       this._scrubRatio = ratioFromEvent(e.clientX);
       showTip(this._scrubRatio);
     });
     const endScrub = (e) => {
       if (!this._scrubbing) return;
-      this._scrubbing = false; el.classList.remove('is-scrubbing');
-      this._tip.hidden = true; this._scrubRatio = null;
+      e.stopPropagation();
+      const targetRatio = this._scrubRatio ?? ratioFromEvent(e.clientX);
+      this._scrubbing = false;
+      el.classList.remove('is-scrubbing');
+      this._tip.hidden = true;
+      this._scrubRatio = null;
       if (e.type !== 'pointercancel' && this.onSeek) {
         Utils.haptic(6);
-        this.onSeek(secFromRatio(ratioFromEvent(e.clientX)));
+        this.onSeek(secFromRatio(targetRatio));
       }
     };
-    el.addEventListener('pointerup', endScrub);
-    el.addEventListener('pointercancel', endScrub);
+    handle.addEventListener('pointerup', endScrub);
+    handle.addEventListener('pointercancel', endScrub);
 
     el.addEventListener('keydown', (e) => {
       if (!this.onSeek) return;
@@ -1744,6 +1820,7 @@ class CoverageTimelineView {
 
   update(book, chapters, st, isChapterScoped, pins = []) {
     this._chapters = chapters || [];
+    if (this.interactive) this._renderWaveform(book.id);
     const curCh = this.app.player.book?.id === book.id ? this.app.player.getCurrentChapter().chapter : null;
     const minT = isChapterScoped && curCh ? curCh.bookStart : 0;
     const maxT = isChapterScoped && curCh ? curCh.bookEnd : (book.duration || 1);
@@ -1752,7 +1829,10 @@ class CoverageTimelineView {
 
     const ratio = Utils.clamp(((st.pos - minT) / span) * 100, 0, 100);
     this._lastRatio = ratio / 100;
-    this._playhead.style.left = `${ratio}%`;
+    if (!this._scrubbing) {
+      this._playhead.style.left = `${ratio}%`;
+      if (this._trail) this._trail.style.width = `${ratio}%`;
+    }
     this.el.setAttribute('aria-valuenow', String(Math.round(ratio)));
 
     const signature = JSON.stringify([st.intervals.length, st.intervals[st.intervals.length - 1] || null, st.gaps.length, minT.toFixed(1), maxT.toFixed(1), chapters.length, pins.length]);
@@ -2833,12 +2913,7 @@ class CadenceApp {
     `;
 
     const tlMount = document.getElementById('detail-timeline-mount');
-    const detailView = new CoverageTimelineView(this, {
-      onSeek: (sec) => {
-        if (this.player.book?.id === book.id) this.player.seekToBookPosition(sec);
-        else this.player.loadBook(book.id, true, sec);
-      }
-    });
+    const detailView = new CoverageTimelineView(this, { interactive: false });
     const pins = [...bookBookmarks.map(b => b.bookTime), ...bookNotes.map(n => n.bookTime)];
     detailView.update(book, chapters, st, false, pins);
     tlMount.appendChild(detailView.el);
@@ -3353,8 +3428,11 @@ class CadenceApp {
     const tlContainer = document.getElementById('fp-coverage-timeline');
     if (tlContainer) {
       if (!this._fpTimelineView || this._fpTimelineView.el.parentNode !== tlContainer) {
+        tlContainer.className = 'fp-timeline-host';
+        tlContainer.removeAttribute('role');
+        tlContainer.removeAttribute('tabindex');
         tlContainer.innerHTML = '';
-        this._fpTimelineView = new CoverageTimelineView(this, { onSeek: (sec) => this.player.seekToBookPosition(sec) });
+        this._fpTimelineView = new CoverageTimelineView(this, { interactive: true, onSeek: (sec) => this.player.seekToBookPosition(sec) });
         tlContainer.appendChild(this._fpTimelineView.el);
       }
       if (force || (performance.now() - this._lastSegmentSyncAt) > 500) {
@@ -3365,10 +3443,11 @@ class CadenceApp {
           ...this.notes.filter(n => n.bookId === book.id).map(n => n.bookTime)
         ];
         this._fpTimelineView.update(book, this.player.chapters, st, isChap, pins);
-      } else {
+      } else if (!this._fpTimelineView._scrubbing) {
         const ratio = Utils.clamp(((st.pos - minT) / Math.max(1, maxT - minT)) * 100, 0, 100);
         this._fpTimelineView._lastRatio = ratio / 100;
         this._fpTimelineView._playhead.style.left = `${ratio}%`;
+        if (this._fpTimelineView._trail) this._fpTimelineView._trail.style.width = `${ratio}%`;
       }
     }
 
